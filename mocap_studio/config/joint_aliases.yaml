@@ -1,0 +1,52 @@
+# Joint Aliases — Per-system joint name → canonical name
+# Used to map different mocap system naming conventions to a common schema
+
+# Canonical names follow the Mixamo / FBX standard convention.
+# Each system section maps that system's joint names to canonical names.
+
+rokoko:
+  Hip: Hips
+  Spine1: Spine
+  Spine2: Spine1
+  Spine3: Spine2
+  Neck1: Neck
+  Head1: Head
+
+perception_neuron:
+  Hips: Hips
+  RightUpLeg: RightUpLeg
+  LeftUpLeg: LeftUpLeg
+  Spine: Spine
+  Spine1: Spine1
+  Spine2: Spine2
+
+optitrack:
+  Hip: Hips
+  Ab: Spine
+  Chest: Spine1
+  Neck: Neck
+  Head: Head
+  LShoulder: LeftShoulder
+  LUArm: LeftArm
+  LFArm: LeftForeArm
+  LHand: LeftHand
+  RShoulder: RightShoulder
+  RUArm: RightArm
+  RFArm: RightForeArm
+  RHand: RightHand
+  LThigh: LeftUpLeg
+  LShin: LeftLeg
+  LFoot: LeftFoot
+  LToe: LeftToeBase
+  RThigh: RightUpLeg
+  RShin: RightLeg
+  RFoot: RightFoot
+  RToe: RightToeBase
+
+xsens:
+  Pelvis: Hips
+  L5: Spine
+  L3: Spine1
+  T8: Spine2
+  Neck: Neck
+  Head: Head

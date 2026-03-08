@@ -1,0 +1,53 @@
+2026-03-08 15:35:04.224 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 15:35:04.225 │ INFO    │ mocap_studio                   │ MoCap Align & Compare v0.1.0 starting
+2026-03-08 15:35:04.225 │ INFO    │ mocap_studio                   │ Log file: C:\Users\bxdpo\Desktop\VOC_MoCap_System\mocap_studio\logs\mocap_studio_20260308_153504.log
+2026-03-08 15:35:04.225 │ INFO    │ mocap_studio                   │ Python: 3.10.19 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 16:41:31) [MSC v.1929 64 bit (AMD64)]
+2026-03-08 15:35:04.232 │ INFO    │ mocap_studio                   │ Platform: win32
+2026-03-08 15:35:04.232 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 15:35:04.260 │ INFO    │ mocap_studio.main              │ Single-instance lock acquired.
+2026-03-08 15:35:04.260 │ INFO    │ mocap_studio                   │ Creating main window...
+2026-03-08 15:35:04.666 │ INFO    │ mocap_studio                   │ Main window shown — entering event loop.
+2026-03-08 15:35:33.836 │ INFO    │ mocap_studio.gui.main_window   │ User requested load for slot 0
+2026-03-08 15:35:37.868 │ INFO    │ mocap_studio.gui.main_window   │ Loading file: C:/Users/bxdpo/Downloads/Xsens_MoCapTest_001-001.fbx (ext=.fbx)
+2026-03-08 15:35:37.871 │ INFO    │ mocap_studio.core.fbx_extract  │ Loading FBX: C:/Users/bxdpo/Downloads/Xsens_MoCapTest_001-001.fbx
+2026-03-08 15:35:37.875 │ DEBUG   │ mocap_studio.core.fbx_extract  │ FBX SDK imported successfully.
+2026-03-08 15:35:37.917 │ DEBUG   │ mocap_studio.core.fbx_extract  │ FBX scene imported successfully.
+2026-03-08 15:35:37.917 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Axis system converted to MayaYUp.
+2026-03-08 15:35:37.918 │ INFO    │ mocap_studio.core.fbx_extract  │ Discovered 24 joints: ['Reference', 'Hips', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase']...
+2026-03-08 15:35:37.918 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Animation stack found: MoCapTest_001-001
+2026-03-08 15:35:37.919 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Time span: 0.000s → 165.039s
+2026-03-08 15:35:37.920 │ INFO    │ mocap_studio.core.fbx_extract  │ Frame count: 9903 @ 60.0 fps (165.05s)
+2026-03-08 15:35:37.920 │ INFO    │ mocap_studio.core.fbx_extract  │ Extracting transforms for 9903 frames × 24 joints...
+2026-03-08 15:35:37.995 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 500/9903 (5%) — 0.1s elapsed
+2026-03-08 15:35:38.071 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 1000/9903 (10%) — 0.2s elapsed
+2026-03-08 15:35:38.146 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 1500/9903 (15%) — 0.2s elapsed
+2026-03-08 15:35:38.220 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 2000/9903 (20%) — 0.3s elapsed
+2026-03-08 15:35:38.294 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 2500/9903 (25%) — 0.4s elapsed
+2026-03-08 15:35:38.370 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 3000/9903 (30%) — 0.4s elapsed
+2026-03-08 15:35:38.447 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 3500/9903 (35%) — 0.5s elapsed
+2026-03-08 15:35:38.523 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 4000/9903 (40%) — 0.6s elapsed
+2026-03-08 15:35:38.596 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 4500/9903 (45%) — 0.7s elapsed
+2026-03-08 15:35:38.671 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 5000/9903 (50%) — 0.8s elapsed
+2026-03-08 15:35:38.745 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 5500/9903 (56%) — 0.8s elapsed
+2026-03-08 15:35:38.819 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 6000/9903 (61%) — 0.9s elapsed
+2026-03-08 15:35:38.891 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 6500/9903 (66%) — 1.0s elapsed
+2026-03-08 15:35:38.966 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 7000/9903 (71%) — 1.0s elapsed
+2026-03-08 15:35:39.040 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 7500/9903 (76%) — 1.1s elapsed
+2026-03-08 15:35:39.112 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 8000/9903 (81%) — 1.2s elapsed
+2026-03-08 15:35:39.186 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 8500/9903 (86%) — 1.3s elapsed
+2026-03-08 15:35:39.262 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 9000/9903 (91%) — 1.3s elapsed
+2026-03-08 15:35:39.339 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 9500/9903 (96%) — 1.4s elapsed
+2026-03-08 15:35:39.400 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 9903/9903 (100%) — 1.5s elapsed
+2026-03-08 15:35:39.400 │ INFO    │ mocap_studio.core.fbx_extract  │ Transform extraction complete in 1.48s
+2026-03-08 15:35:39.407 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Position range: min=[-138.42033411   -1.16599959 -252.78158392], max=[181.24608664 189.56303914 228.71388194]
+2026-03-08 15:35:39.407 │ INFO    │ mocap_studio.core.fbx_extract  │ FBX load complete: "Xsens_MoCapTest_001-001" — 9903 frames, 24 joints, align_joint="Hips", total time 1.54s
+2026-03-08 15:35:39.413 │ INFO    │ mocap_studio.core.session      │ Track loaded into slot 0: "Xsens_MoCapTest_001-001" (9903 frames, 24 joints)
+2026-03-08 15:35:46.803 │ INFO    │ mocap_studio.gui.main_window   │ Playback started (speed=1.0x)
+2026-03-08 15:36:05.409 │ INFO    │ mocap_studio.gui.main_window   │ Playback stopped, reset to frame 0
+2026-03-08 15:37:58.230 │ DEBUG   │ mocap_studio.gui.main_window   │ Track 0 settings: offset=0, trim=0-9902, align=Hips, visible=False
+2026-03-08 15:37:59.061 │ DEBUG   │ mocap_studio.gui.main_window   │ Track 0 settings: offset=0, trim=0-9902, align=Hips, visible=True
+2026-03-08 15:38:01.294 │ DEBUG   │ mocap_studio.gui.main_window   │ Track 0 settings: offset=0, trim=0-9902, align=Reference, visible=True
+2026-03-08 15:38:04.593 │ INFO    │ mocap_studio.gui.main_window   │ Playback started (speed=1.0x)
+2026-03-08 15:43:01.458 │ INFO    │ mocap_studio.gui.main_window   │ Playback stopped, reset to frame 0
+2026-03-08 15:43:13.862 │ DEBUG   │ mocap_studio.gui.script_editor │ New script
+2026-03-08 15:43:15.375 │ DEBUG   │ mocap_studio.gui.script_editor │ New script

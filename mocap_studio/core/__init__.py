@@ -1,0 +1,1 @@
+# MoCap Studio - Core Module

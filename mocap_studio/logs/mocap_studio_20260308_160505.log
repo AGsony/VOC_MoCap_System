@@ -1,0 +1,34 @@
+2026-03-08 16:05:05.015 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 16:05:05.015 │ INFO    │ mocap_studio                   │ MoCap Align & Compare v0.1.0 starting
+2026-03-08 16:05:05.015 │ INFO    │ mocap_studio                   │ Log file: C:\Users\bxdpo\Desktop\VOC_MoCap_System\mocap_studio\logs\mocap_studio_20260308_160505.log
+2026-03-08 16:05:05.015 │ INFO    │ mocap_studio                   │ Python: 3.10.19 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 16:41:31) [MSC v.1929 64 bit (AMD64)]
+2026-03-08 16:05:05.025 │ INFO    │ mocap_studio                   │ Platform: win32
+2026-03-08 16:05:05.025 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 16:05:05.053 │ INFO    │ mocap_studio.main              │ Single-instance lock acquired.
+2026-03-08 16:05:05.053 │ INFO    │ mocap_studio                   │ Creating main window...
+2026-03-08 16:05:05.442 │ INFO    │ mocap_studio                   │ Main window shown — entering event loop.
+2026-03-08 16:05:27.829 │ INFO    │ mocap_studio.gui.main_window   │ User requested load for slot 0
+2026-03-08 16:05:31.129 │ INFO    │ mocap_studio.gui.main_window   │ Loading file: C:/Users/bxdpo/Downloads/CatsEye_Captury_Test.fbx (ext=.fbx)
+2026-03-08 16:05:31.129 │ INFO    │ mocap_studio.core.fbx_extract  │ Loading FBX: C:/Users/bxdpo/Downloads/CatsEye_Captury_Test.fbx
+2026-03-08 16:05:31.134 │ DEBUG   │ mocap_studio.core.fbx_extract  │ FBX SDK imported successfully.
+2026-03-08 16:05:31.261 │ DEBUG   │ mocap_studio.core.fbx_extract  │ FBX scene imported successfully.
+2026-03-08 16:05:31.267 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Axis system converted to MayaYUp.
+2026-03-08 16:05:31.267 │ INFO    │ mocap_studio.core.fbx_extract  │ Discovered 89 joints: ['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'neck_01', 'neck_02', 'head']...
+2026-03-08 16:05:31.269 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Animation stack found: Unreal Take
+2026-03-08 16:05:31.269 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Time span: 0.000s → 62.267s
+2026-03-08 16:05:31.270 │ INFO    │ mocap_studio.core.fbx_extract  │ Frame count: 3737 @ 60.0 fps (62.28s)
+2026-03-08 16:05:31.270 │ INFO    │ mocap_studio.core.fbx_extract  │ Extracting transforms for 3737 frames × 89 joints...
+2026-03-08 16:05:31.604 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 500/3737 (13%) — 0.3s elapsed
+2026-03-08 16:05:31.941 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 1000/3737 (27%) — 0.7s elapsed
+2026-03-08 16:05:32.276 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 1500/3737 (40%) — 1.0s elapsed
+2026-03-08 16:05:32.612 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 2000/3737 (54%) — 1.3s elapsed
+2026-03-08 16:05:32.944 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 2500/3737 (67%) — 1.7s elapsed
+2026-03-08 16:05:33.277 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 3000/3737 (80%) — 2.0s elapsed
+2026-03-08 16:05:33.609 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 3500/3737 (94%) — 2.3s elapsed
+2026-03-08 16:05:33.770 │ DEBUG   │ mocap_studio.core.fbx_extract  │   Frame 3737/3737 (100%) — 2.5s elapsed
+2026-03-08 16:05:33.770 │ INFO    │ mocap_studio.core.fbx_extract  │ Transform extraction complete in 2.50s
+2026-03-08 16:05:33.780 │ DEBUG   │ mocap_studio.core.fbx_extract  │ Position range: min=[-156.19447701   -8.75309859 -253.71797531], max=[133.16410752 213.38815567 310.08474785]
+2026-03-08 16:05:33.780 │ INFO    │ mocap_studio.core.fbx_extract  │ FBX load complete: "CatsEye_Captury_Test" — 3737 frames, 89 joints, align_joint="pelvis", total time 2.65s
+2026-03-08 16:05:33.794 │ INFO    │ mocap_studio.core.session      │ Track loaded into slot 0: "CatsEye_Captury_Test" (3737 frames, 89 joints)
+2026-03-08 16:05:37.628 │ INFO    │ mocap_studio.gui.main_window   │ Track 0: 0 joints hidden
+2026-03-08 16:07:10.787 │ INFO    │ mocap_studio                   │ Application exiting with code 0.
