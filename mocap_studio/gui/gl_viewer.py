@@ -74,18 +74,26 @@ class GLViewer(QOpenGLWidget):
         self.setMinimumSize(400, 300)
         self.setFocusPolicy(Qt.StrongFocus)
 
+        # Drag state
+        self._last_mouse_pos = QPoint()
+        self._is_dragging = False
+        self._drag_threshold = 4  # pixels — click vs drag
+        
+        self.setFocusPolicy(Qt.StrongFocus)
+
         # Selection state
         self._selected_slot: int = -1
         self._selected_joint: int = -1
-        self._drag_threshold = 4  # pixels — click vs drag
+        # The original _drag_threshold was here, but it's now moved to "Drag state"
+        # self._drag_threshold = 4  # pixels — click vs drag
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def set_track_data(self, slot: int, positions: Optional[np.ndarray],
                        bone_pairs: Optional[list], visible: bool = True,
-                       hidden_joints: Optional[set] = None,
                        translate: tuple = (0.0, 0.0, 0.0),
+                       rotate: tuple = (0.0, 0.0, 0.0),
                        joint_names: Optional[list] = None):
         """
         Update data for a track slot.
@@ -93,6 +101,7 @@ class GLViewer(QOpenGLWidget):
         bone_pairs: list of (parent_idx, child_idx)
         hidden_joints: set of joint indices to skip
         translate: (tx, ty, tz) world-space offset
+        rotate: (rx, ry, rz) degrees offset
         joint_names: list of joint names for picking
         """
         if positions is not None and bone_pairs is not None:
@@ -102,6 +111,7 @@ class GLViewer(QOpenGLWidget):
                 "visible": visible,
                 "hidden_joints": hidden_joints or set(),
                 "translate": translate,
+                "rotate": rotate,
                 "joint_names": joint_names or [],
             }
         else:
@@ -221,6 +231,7 @@ class GLViewer(QOpenGLWidget):
         bone_pairs = track_data["bone_pairs"]
         hidden = track_data.get("hidden_joints", set())
         translate = track_data.get("translate", (0.0, 0.0, 0.0))
+        rotate = track_data.get("rotate", (0.0, 0.0, 0.0))
         frame = self._current_frame
 
         if frame >= len(positions):
@@ -230,10 +241,14 @@ class GLViewer(QOpenGLWidget):
 
         joint_pos = positions[frame]  # (J, 3)
 
-        # Apply 3D position offset
+        # Apply 3D position and rotation offset
         glPushMatrix()
         if translate != (0.0, 0.0, 0.0):
             glTranslatef(translate[0], translate[1], translate[2])
+        if rotate != (0.0, 0.0, 0.0):
+            glRotatef(rotate[2], 0, 0, 1) # Z
+            glRotatef(rotate[1], 0, 1, 0) # Y
+            glRotatef(rotate[0], 1, 0, 0) # X
 
         # Draw bones as lines (skip hidden joints)
         color = TRACK_COLORS[slot % len(TRACK_COLORS)]

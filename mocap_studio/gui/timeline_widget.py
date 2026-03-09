@@ -40,6 +40,7 @@ class TimelineWidget(QWidget):
         self._tracks: List[Optional[dict]] = [None] * 5
 
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         # View parameters
         self._zoom: float = 1.0      # pixels per frame
@@ -52,12 +53,12 @@ class TimelineWidget(QWidget):
         self._drag_start_val: float = 0.0
 
         # Layout constants
-        self.TRACK_HEIGHT = 14
-        self.TRACK_GAP = 4
+        self.TRACK_HEIGHT = 18
+        self.TRACK_GAP = 6
         self.MARGIN_TOP = 10
         self.MARGIN_LEFT = 40
         self.MARGIN_RIGHT = 10
-        self.HANDLE_WIDTH = 6
+        self.HANDLE_WIDTH = 12
 
     # ------------------------------------------------------------------
     # Public API
@@ -215,11 +216,11 @@ class TimelineWidget(QWidget):
             painter.setPen(Qt.NoPen)
             from PySide6.QtGui import QPolygonF
             from PySide6.QtCore import QPointF
-            tri_size = 5
+            tri_size = 9
             triangle = QPolygonF([
                 QPointF(scrub_x - tri_size, scrubber_y_start),
                 QPointF(scrub_x + tri_size, scrubber_y_start),
-                QPointF(scrub_x, scrubber_y_start + tri_size),
+                QPointF(scrub_x, scrubber_y_start + tri_size + 2),
             ])
             painter.drawPolygon(triangle)
 

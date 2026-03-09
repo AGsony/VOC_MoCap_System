@@ -538,10 +538,25 @@ class MainWindow(QMainWindow):
 
     def _on_export_requested(self):
         log.info(f"Timeline Export requested.")
-        QMessageBox.information(self, "Export Timeline", 
-                                f"Exporting BVH/FBX is currently under development.\n\n"
-                                f"A future update will write out the entire visible timeline "
-                                f"merging any active alignments.")
+        path, filter_str = QFileDialog.getSaveFileName(
+            self, "Export Timeline", "",
+            "FBX Files (*.fbx);;BVH Files (*.bvh);;All Files (*)"
+        )
+        if not path:
+            return
+            
+        try:
+            if path.lower().endswith('.fbx'):
+                from core.exporter import export_timeline_to_fbx
+                export_timeline_to_fbx(self._session, path)
+            else:
+                from core.exporter import export_timeline_to_bvh
+                export_timeline_to_bvh(self._session, path)
+                
+            QMessageBox.information(self, "Export Timeline", f"Successfully exported timeline to:\n{path}")
+        except Exception as e:
+            log.error(f"Failed to export timeline: {e}", exc_info=True)
+            QMessageBox.critical(self, "Export Error", str(e))
 
     def _on_cut_requested(self):
         gframe = self._session.current_frame
