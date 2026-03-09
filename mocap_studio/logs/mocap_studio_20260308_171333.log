@@ -1,0 +1,11 @@
+2026-03-08 17:13:33.125 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 17:13:33.125 │ INFO    │ mocap_studio                   │ MoCap Align & Compare v0.1.0 starting
+2026-03-08 17:13:33.125 │ INFO    │ mocap_studio                   │ Log file: C:\Users\bxdpo\Desktop\VOC_MoCap_System\mocap_studio\logs\mocap_studio_20260308_171333.log
+2026-03-08 17:13:33.125 │ INFO    │ mocap_studio                   │ Python: 3.10.19 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 16:41:31) [MSC v.1929 64 bit (AMD64)]
+2026-03-08 17:13:33.134 │ INFO    │ mocap_studio                   │ Platform: win32
+2026-03-08 17:13:33.135 │ INFO    │ mocap_studio                   │ Cleaned up 1 old log file(s)
+2026-03-08 17:13:33.135 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 17:13:33.161 │ INFO    │ mocap_studio.main              │ Single-instance lock acquired.
+2026-03-08 17:13:33.161 │ INFO    │ mocap_studio                   │ Creating main window...
+2026-03-08 17:13:33.594 │ INFO    │ mocap_studio                   │ Main window shown — entering event loop.
+2026-03-08 17:16:39.010 │ INFO    │ mocap_studio                   │ Application exiting with code 0.

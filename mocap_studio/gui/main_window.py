@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QFileDialog, QComboBox, QStatusBar,
     QMenuBar, QMenu, QSpinBox, QMessageBox, QApplication,
+    QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
@@ -39,6 +40,7 @@ from .gl_viewer import GLViewer
 from .timeline_widget import TimelineWidget
 from .track_panel import TrackPanel
 from .script_editor import ScriptEditor
+from .console_widget import ConsoleWidget
 from .styles import DARK_STYLESHEET
 
 log = logging.getLogger("mocap_studio.gui.main_window")
@@ -151,6 +153,8 @@ class MainWindow(QMainWindow):
         self._track_panel.unload_requested.connect(self._on_unload_track)
         self._track_panel.settings_changed.connect(self._on_track_settings_changed)
         self._track_panel.joints_changed.connect(self._on_joints_changed)
+        self._track_panel.auto_align_requested.connect(self._on_auto_align_requested)
+        self._track_panel.file_dropped.connect(self._on_file_dropped)
         top_splitter.addWidget(self._track_panel)
 
         top_splitter.setStretchFactor(0, 3)
@@ -175,6 +179,18 @@ class MainWindow(QMainWindow):
         self._stop_btn.setFixedWidth(80)
         self._stop_btn.clicked.connect(self._on_stop)
         controls_layout.addWidget(self._stop_btn)
+
+        controls_layout.addSpacing(20)
+
+        self._cut_btn = QPushButton("✂ Cut")
+        self._cut_btn.setToolTip("Trim all loaded tracks to the current playhead position")
+        self._cut_btn.clicked.connect(self._on_cut_requested)
+        controls_layout.addWidget(self._cut_btn)
+
+        self._export_btn = QPushButton("💾 Export Timeline")
+        self._export_btn.setToolTip("Export the entire aligned timeline to BVH/FBX")
+        self._export_btn.clicked.connect(self._on_export_requested)
+        controls_layout.addWidget(self._export_btn)
 
         controls_layout.addSpacing(20)
 
@@ -206,11 +222,21 @@ class MainWindow(QMainWindow):
 
         self._timeline = TimelineWidget()
         self._timeline.frame_changed.connect(self._on_timeline_frame_changed)
+        self._timeline.track_offset_changed.connect(self._on_track_offset_changed)
+        self._timeline.track_trim_changed.connect(self._on_track_trim_changed)
         bottom_splitter.addWidget(self._timeline)
+
+        bottom_tabs = QTabWidget()
+        bottom_tabs.setTabPosition(QTabWidget.South)
+
+        self._console = ConsoleWidget()
+        bottom_tabs.addTab(self._console, "System Console")
 
         self._script_editor = ScriptEditor()
         self._script_editor.set_session(self._session)
-        bottom_splitter.addWidget(self._script_editor)
+        bottom_tabs.addTab(self._script_editor, "Script Editor")
+
+        bottom_splitter.addWidget(bottom_tabs)
 
         bottom_splitter.setSizes([120, 250])
         main_layout.addWidget(bottom_splitter, 3)
@@ -250,6 +276,22 @@ class MainWindow(QMainWindow):
         self._update_frame_range()
         self._update_status()
 
+    def _on_file_dropped(self, slot: int, path: str):
+        log.info(f"File dropped into slot {slot}: {path}")
+        try:
+            track = _load_file(path)
+        except Exception as e:
+            log.error(f"Failed to load dropped track into slot {slot}: {e}", exc_info=True)
+            QMessageBox.critical(self, "Load Error", str(e))
+            return
+
+        self._session.load_track(slot, track)
+        self._update_track_ui(slot)
+        self._update_viewer()
+        self._update_timeline()
+        self._update_frame_range()
+        self._update_status()
+
     def _on_unload_track(self, slot: int):
         log.info(f"Unloading track from slot {slot}")
         self._session.remove_track(slot)
@@ -269,6 +311,12 @@ class MainWindow(QMainWindow):
             joint_names=track.skeleton.joint_names,
             frame_count=track.frame_count,
             align_joint=track.align_joint,
+            offset=track.offset,
+            scale=track.scale,
+            trim_in=track.trim_in,
+            trim_out=track.trim_out,
+            visible=track.visible,
+            translate=track.translate,
         )
 
     # ------------------------------------------------------------------
@@ -280,7 +328,9 @@ class MainWindow(QMainWindow):
             return
 
         tc = self._track_panel.track_controls[slot]
+
         track.offset = tc.offset_spin.value()
+        track.scale = tc.scale_spin.value()
         track.trim_in = tc.trim_in_spin.value()
         track.trim_out = tc.trim_out_spin.value()
 
@@ -293,21 +343,52 @@ class MainWindow(QMainWindow):
         track.translate_x = tc.pos_x_spin.value()
         track.translate_y = tc.pos_y_spin.value()
         track.translate_z = tc.pos_z_spin.value()
+        track.rotate_x = tc.rot_x_spin.value()
+        track.rotate_y = tc.rot_y_spin.value()
+        track.rotate_z = tc.rot_z_spin.value()
 
         # Check reference
         if tc.ref_radio.isChecked():
             self._session.reference_index = slot
 
         log.debug(
-            f"Track {slot} settings: offset={track.offset}, "
+            f"Track {slot} settings: offset={track.offset}, scale={track.scale}, "
             f"trim={track.trim_in}-{track.trim_out}, "
             f"align={track.align_joint}, visible={track.visible}, "
-            f"pos=({track.translate_x}, {track.translate_y}, {track.translate_z})"
+            f"translate=({track.translate_x}, {track.translate_y}, {track.translate_z}), "
+            f"rotate=({track.rotate_x}, {track.rotate_y}, {track.rotate_z})"
         )
 
         self._update_viewer()
         self._update_timeline()
         self._update_frame_range()
+
+    def _on_track_offset_changed(self, slot: int, offset: float):
+        track = self._session.tracks[slot]
+        if track is not None:
+            track.offset = offset
+            tc = self._track_panel.track_controls[slot]
+            tc.offset_spin.blockSignals(True)
+            tc.offset_spin.setValue(offset)
+            tc.offset_spin.blockSignals(False)
+            self._update_viewer()
+            self._update_frame_range()
+            
+    def _on_track_trim_changed(self, slot: int, trim_in: int, trim_out: int):
+        track = self._session.tracks[slot]
+        if track is not None:
+            track.trim_in = trim_in
+            track.trim_out = trim_out
+            tc = self._track_panel.track_controls[slot]
+            tc.trim_in_spin.blockSignals(True)
+            tc.trim_out_spin.blockSignals(True)
+            tc.trim_in_spin.setValue(trim_in)
+            tc.trim_out_spin.setValue(trim_out)
+            tc.trim_in_spin.blockSignals(False)
+            tc.trim_out_spin.blockSignals(False)
+            self._update_viewer()
+            self._update_timeline()
+            self._update_frame_range()
 
     def _on_joints_changed(self, slot: int, hidden_joints: set):
         track = self._session.tracks[slot]
@@ -316,6 +397,24 @@ class MainWindow(QMainWindow):
         track.hidden_joints = hidden_joints
         log.info(f"Track {slot}: {len(hidden_joints)} joints hidden")
         self._update_viewer()
+
+    def _on_auto_align_requested(self, slot: int):
+        ref_idx = self._session.reference_index
+        if slot == ref_idx:
+            QMessageBox.information(self, "Auto-Align", "Cannot auto-align the reference track to itself.")
+            return
+            
+        ref_track = self._session.tracks[ref_idx]
+        test_track = self._session.tracks[slot]
+        
+        if not ref_track or not test_track:
+            return
+            
+        from core.align import auto_align_tracks
+        optimal_offset = auto_align_tracks(ref_track, test_track)
+        
+        log.info(f"Auto-align track {slot} -> {optimal_offset} offset")
+        self._on_track_offset_changed(slot, optimal_offset)
 
     def _on_joint_selected(self, slot: int, joint_index: int, joint_name: str):
         """Handle bone picking from the 3D viewer."""
@@ -340,15 +439,40 @@ class MainWindow(QMainWindow):
                 self._viewer.set_track_data(slot, None, None)
                 continue
 
-            # Apply frame offset by prepending/trimming
+            # Apply frame offset and scale via sub-frame interpolation
             offset = track.offset
+            scale = track.scale
+            
+            F, J, C = aligned.shape
+            
+            # The Viewer expects `aligned[f]` to correspond to global frame `f`.
+            # So we must generate an array starting at global frame 0.
             if offset > 0:
-                # Pad beginning with first frame
-                pad = np.tile(aligned[0:1], (offset, 1, 1))
-                aligned = np.concatenate([pad, aligned], axis=0)
-            elif offset < 0:
-                # Trim beginning
-                aligned = aligned[abs(offset):]
+                total_frames = int(np.ceil(offset + F * scale))
+            else:
+                total_frames = int(np.ceil(F * scale + offset))
+            total_frames = max(0, total_frames)
+            
+            if total_frames > 0:
+                global_frames = np.arange(total_frames)
+                
+                # local_time = (global_frame - offset) / scale
+                local_times = (global_frames - offset) / scale
+                
+                # Clamp local_times to the valid range of the original track [0, F-1]
+                # This naturally handles padding: 
+                # global frames < offset will clamp to local 0.
+                # global frames > offset + (F-1) * scale will clamp to local F-1.
+                local_times = np.clip(local_times, 0, F - 1)
+                
+                # Perform linear interpolation
+                idx0 = np.floor(local_times).astype(int)
+                idx1 = np.minimum(idx0 + 1, F - 1)
+                frac = (local_times - idx0)[:, np.newaxis, np.newaxis]
+                
+                aligned = aligned[idx0] * (1.0 - frac) + aligned[idx1] * frac
+            else:
+                aligned = np.zeros((0, J, C))
 
             self._viewer.set_track_data(
                 slot, aligned,
@@ -410,16 +534,52 @@ class MainWindow(QMainWindow):
         self._set_frame(frame)
 
     def _on_frame_spinbox_changed(self, value: int):
-        self._set_frame(value)
+        self._update_timeline()
+
+    def _on_export_requested(self):
+        log.info(f"Timeline Export requested.")
+        QMessageBox.information(self, "Export Timeline", 
+                                f"Exporting BVH/FBX is currently under development.\n\n"
+                                f"A future update will write out the entire visible timeline "
+                                f"merging any active alignments.")
+
+    def _on_cut_requested(self):
+        gframe = self._session.current_frame
+        cut_count = 0
+        
+        for slot, track in enumerate(self._session.tracks):
+            if track is None:
+                continue
+                
+            local_f = int(round((gframe - track.offset) / track.scale))
+            
+            if local_f < 0 or local_f >= track.frame_count:
+                continue # Playhead is outside this track
+
+            midpoint = (track.trim_in + track.trim_out) / 2.0
+            if local_f <= midpoint:
+                track.trim_in = local_f
+            else:
+                track.trim_out = local_f
+            
+            cut_count += 1
+            self._update_track_ui(slot)
+
+        if cut_count > 0:
+            log.info(f"Timeline Cut: Trimmed {cut_count} tracks at frame {gframe}")
+            self._update_timeline()
+            self._update_frame_range()
+            self._update_viewer()
+        else:
+            QMessageBox.warning(self, "Cut Timeline", "Playhead is outside the bounds of all loaded tracks.")
 
     # ------------------------------------------------------------------
-    # Playback
+    # Playback Control
     # ------------------------------------------------------------------
     def _on_play(self):
         log.info(f"Playback started (speed={self._playback_speed}x)")
         self._playing = True
         self._play_timer.start()
-        self._play_btn.setEnabled(False)
 
     def _on_pause(self):
         log.info(f"Playback paused at frame {self._session.current_frame}")
@@ -442,6 +602,25 @@ class MainWindow(QMainWindow):
         if new_frame >= mx:
             new_frame = 0  # loop
         self._set_frame(new_frame)
+
+    def keyPressEvent(self, event):
+        """Keyboard shortcuts for playback."""
+        if event.key() == Qt.Key_Space:
+            if self._play_timer.isActive():
+                self._on_pause()
+            else:
+                self._on_play()
+            event.accept()
+        elif event.key() == Qt.Key_Left:
+            step = 10 if event.modifiers() == Qt.ShiftModifier else 1
+            self._set_frame(self._session.current_frame - step)
+            event.accept()
+        elif event.key() == Qt.Key_Right:
+            step = 10 if event.modifiers() == Qt.ShiftModifier else 1
+            self._set_frame(self._session.current_frame + step)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def _on_speed_changed(self, text: str):
         try:

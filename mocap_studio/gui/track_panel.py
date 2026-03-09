@@ -162,6 +162,48 @@ class JointDropdownPopup(QFrame):
 
 
 # ---------------------------------------------------------------------------
+# Draggable SpinBox
+# ---------------------------------------------------------------------------
+class DraggableSpinBox(QDoubleSpinBox):
+    """A spinbox that allows changing its value by clicking and dragging horizontally."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag_start_pos = None
+        self._drag_start_value = 0.0
+        
+        # We must intercept mouse events on the internal line edit
+        self.lineEdit().setCursor(Qt.SizeHorCursor)
+        self.lineEdit().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj == self.lineEdit():
+            # Mouse Press
+            if event.type() == event.Type.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._drag_start_pos = event.globalPosition()
+                self._drag_start_value = self.value()
+                # Clear focus to allow dragging instead of text selection
+                self.lineEdit().clearFocus()
+                return True
+            # Mouse Move
+            elif event.type() == event.Type.MouseMove and self._drag_start_pos is not None:
+                delta = event.globalPosition().x() - self._drag_start_pos.x()
+                sensitivity = self.singleStep()
+                modifiers = event.modifiers()
+                if modifiers & Qt.ShiftModifier:
+                    sensitivity *= 10.0
+                elif modifiers & Qt.ControlModifier:
+                    sensitivity *= 0.1
+                
+                self.setValue(self._drag_start_value + (delta * sensitivity))
+                return True
+            # Mouse Release
+            elif event.type() == event.Type.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self._drag_start_pos = None
+                return True
+                
+        return super().eventFilter(obj, event)
+
+# ---------------------------------------------------------------------------
 # Single track controls
 # ---------------------------------------------------------------------------
 class SingleTrackControls(QGroupBox):
@@ -171,6 +213,8 @@ class SingleTrackControls(QGroupBox):
     unload_requested = Signal(int)  # slot
     settings_changed = Signal(int)  # slot
     joints_changed = Signal(int, set)  # slot, hidden_joints
+    auto_align_requested = Signal(int) # slot
+    file_dropped = Signal(int, str) # slot, path
 
     def __init__(self, slot: int, parent=None):
         super().__init__(parent)
@@ -178,6 +222,8 @@ class SingleTrackControls(QGroupBox):
         self._loaded = False
         self._joint_names: List[str] = []
         self._hidden_joints: Set[str] = set()
+
+        self.setAcceptDrops(True)
 
         self.setTitle(f"  Track {slot + 1}")
         self.setStyleSheet(f"""
@@ -200,7 +246,7 @@ class SingleTrackControls(QGroupBox):
         layout.setSpacing(4)
         layout.setContentsMargins(6, 6, 6, 6)
 
-        # Row 1: Load button + visibility
+        # Row 1: Load, Visibility
         row1 = QHBoxLayout()
         self.load_btn = QPushButton("Load FBX/BVH")
         self.load_btn.clicked.connect(lambda: self.load_requested.emit(self.slot))
@@ -238,22 +284,42 @@ class SingleTrackControls(QGroupBox):
         )
         row3.addWidget(self.align_combo, 1)
 
+        self.auto_btn = QPushButton("Auto-Sync")
+        self.auto_btn.setFixedHeight(22)
+        self.auto_btn.setToolTip("Auto-sync this track's offset against the Reference track")
+        self.auto_btn.clicked.connect(lambda: self.auto_align_requested.emit(self.slot))
+        row3.addWidget(self.auto_btn)
+
         self.ref_radio = QRadioButton("Ref")
         self.ref_radio.setToolTip("Set as reference track")
         row3.addWidget(self.ref_radio)
         layout.addLayout(row3)
 
-        # Row 4: Offset
+        # Row 4: Offset & Scale
         row4 = QHBoxLayout()
         row4.addWidget(QLabel("Offset:"))
-        self.offset_spin = QSpinBox()
-        self.offset_spin.setRange(-10000, 10000)
-        self.offset_spin.setValue(0)
+        self.offset_spin = QDoubleSpinBox()
+        self.offset_spin.setRange(-10000.0, 10000.0)
+        self.offset_spin.setDecimals(2)
+        self.offset_spin.setSingleStep(1.0)
+        self.offset_spin.setValue(0.0)
         self.offset_spin.setMinimumWidth(50)
         self.offset_spin.valueChanged.connect(
             lambda: self.settings_changed.emit(self.slot)
         )
-        row4.addWidget(self.offset_spin, 1)
+        row4.addWidget(self.offset_spin)
+        
+        row4.addWidget(QLabel("Scale:"))
+        self.scale_spin = QDoubleSpinBox()
+        self.scale_spin.setRange(0.01, 10.0)
+        self.scale_spin.setDecimals(3)
+        self.scale_spin.setSingleStep(0.01)
+        self.scale_spin.setValue(1.0)
+        self.scale_spin.setMinimumWidth(50)
+        self.scale_spin.valueChanged.connect(
+            lambda: self.settings_changed.emit(self.slot)
+        )
+        row4.addWidget(self.scale_spin, 1)
         layout.addLayout(row4)
 
         # Row 5: Trim In/Out
@@ -299,29 +365,52 @@ class SingleTrackControls(QGroupBox):
         row6.addWidget(self.pos_z_spin, 1)
         layout.addLayout(row6)
 
-        # Row 7: Joints dropdown button
+        # Row 7: Rotation XYZ
         row7 = QHBoxLayout()
+        row7.setSpacing(2)
+
+        self.rot_x_spin = self._make_pos_spin("RX", 360.0)
+        self.rot_y_spin = self._make_pos_spin("RY", 360.0)
+        self.rot_z_spin = self._make_pos_spin("RZ", 360.0)
+
+        lrx = QLabel("RX:")
+        lrx.setFixedWidth(20)
+        lry = QLabel("RY:")
+        lry.setFixedWidth(20)
+        lrz = QLabel("RZ:")
+        lrz.setFixedWidth(20)
+
+        row7.addWidget(lrx)
+        row7.addWidget(self.rot_x_spin, 1)
+        row7.addWidget(lry)
+        row7.addWidget(self.rot_y_spin, 1)
+        row7.addWidget(lrz)
+        row7.addWidget(self.rot_z_spin, 1)
+        layout.addLayout(row7)
+
+        # Row 8: Joints dropdown button
+        row8 = QHBoxLayout()
         self.joints_btn = QPushButton("🦴 Joints ▾")
         self.joints_btn.setFixedHeight(24)
         self.joints_btn.setToolTip("Show/hide individual joints")
         self.joints_btn.clicked.connect(self._on_joints_clicked)
-        row7.addWidget(self.joints_btn)
+        row8.addWidget(self.joints_btn)
 
         self.joints_count_label = QLabel("")
         self.joints_count_label.setStyleSheet(
             "color: #888; font-size: 10px; font-weight: normal;"
         )
-        row7.addWidget(self.joints_count_label)
-        row7.addStretch()
-        layout.addLayout(row7)
+        row8.addWidget(self.joints_count_label)
+        row8.addStretch()
+        layout.addLayout(row8)
 
         self.setLayout(layout)
         self._set_controls_enabled(False)
 
     # ------------------------------------------------------------------
-    def _make_pos_spin(self, axis: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setRange(-10000.0, 10000.0)
+    def _make_pos_spin(self, axis: str, spin_range: float=10000.0) -> DraggableSpinBox:
+        spin = DraggableSpinBox()
+        spin.setRange(-spin_range, spin_range)
         spin.setSingleStep(1.0)
         spin.setDecimals(1)
         spin.setValue(0.0)
@@ -379,10 +468,17 @@ class SingleTrackControls(QGroupBox):
         self.pos_x_spin.setEnabled(enabled)
         self.pos_y_spin.setEnabled(enabled)
         self.pos_z_spin.setEnabled(enabled)
+        self.rot_x_spin.setEnabled(enabled)
+        self.rot_y_spin.setEnabled(enabled)
+        self.rot_z_spin.setEnabled(enabled)
         self.joints_btn.setEnabled(enabled)
 
     def set_loaded(self, name: str, joint_names: List[str],
-                   frame_count: int, align_joint: str):
+                   frame_count: int, align_joint: str,
+                   offset: float = 0.0, scale: float = 1.0,
+                   trim_in: int = 0, trim_out: int = 0,
+                   visible: bool = True, translate: tuple = (0.0, 0.0, 0.0),
+                   rotate: tuple = (0.0, 0.0, 0.0)):
         """Called after a track is loaded successfully."""
         self._loaded = True
         self._joint_names = joint_names
@@ -393,12 +489,16 @@ class SingleTrackControls(QGroupBox):
         # Block all signals during setup
         self.align_combo.blockSignals(True)
         self.offset_spin.blockSignals(True)
+        self.scale_spin.blockSignals(True)
         self.trim_in_spin.blockSignals(True)
         self.trim_out_spin.blockSignals(True)
         self.visible_cb.blockSignals(True)
         self.pos_x_spin.blockSignals(True)
         self.pos_y_spin.blockSignals(True)
         self.pos_z_spin.blockSignals(True)
+        self.rot_x_spin.blockSignals(True)
+        self.rot_y_spin.blockSignals(True)
+        self.rot_z_spin.blockSignals(True)
 
         self.align_combo.clear()
         self.align_combo.addItems(joint_names)
@@ -406,15 +506,19 @@ class SingleTrackControls(QGroupBox):
         if idx >= 0:
             self.align_combo.setCurrentIndex(idx)
 
-        self.offset_spin.setValue(0)
+        self.offset_spin.setValue(offset)
+        self.scale_spin.setValue(scale)
         self.trim_in_spin.setRange(0, frame_count - 1)
         self.trim_out_spin.setRange(0, frame_count - 1)
-        self.trim_in_spin.setValue(0)
-        self.trim_out_spin.setValue(frame_count - 1)
-        self.visible_cb.setChecked(True)
-        self.pos_x_spin.setValue(0.0)
-        self.pos_y_spin.setValue(0.0)
-        self.pos_z_spin.setValue(0.0)
+        self.trim_in_spin.setValue(trim_in)
+        self.trim_out_spin.setValue(trim_out)
+        self.visible_cb.setChecked(visible)
+        self.pos_x_spin.setValue(translate[0])
+        self.pos_y_spin.setValue(translate[1])
+        self.pos_z_spin.setValue(translate[2])
+        self.rot_x_spin.setValue(rotate[0])
+        self.rot_y_spin.setValue(rotate[1])
+        self.rot_z_spin.setValue(rotate[2])
 
         # Unblock all signals
         self.align_combo.blockSignals(False)
@@ -425,6 +529,9 @@ class SingleTrackControls(QGroupBox):
         self.pos_x_spin.blockSignals(False)
         self.pos_y_spin.blockSignals(False)
         self.pos_z_spin.blockSignals(False)
+        self.rot_x_spin.blockSignals(False)
+        self.rot_y_spin.blockSignals(False)
+        self.rot_z_spin.blockSignals(False)
 
         self._update_joints_label()
         self.load_btn.setText("Reload")
@@ -440,29 +547,41 @@ class SingleTrackControls(QGroupBox):
         # Block signals during teardown
         self.align_combo.blockSignals(True)
         self.offset_spin.blockSignals(True)
+        self.scale_spin.blockSignals(True) # Added scale_spin
         self.trim_in_spin.blockSignals(True)
         self.trim_out_spin.blockSignals(True)
         self.visible_cb.blockSignals(True)
         self.pos_x_spin.blockSignals(True)
         self.pos_y_spin.blockSignals(True)
         self.pos_z_spin.blockSignals(True)
+        self.rot_x_spin.blockSignals(True)
+        self.rot_y_spin.blockSignals(True)
+        self.rot_z_spin.blockSignals(True)
 
         self.align_combo.clear()
         self.offset_spin.setValue(0)
+        self.scale_spin.setValue(1.0) # Added scale_spin
         self.trim_in_spin.setValue(0)
         self.trim_out_spin.setValue(0)
         self.pos_x_spin.setValue(0.0)
         self.pos_y_spin.setValue(0.0)
         self.pos_z_spin.setValue(0.0)
+        self.rot_x_spin.setValue(0.0)
+        self.rot_y_spin.setValue(0.0)
+        self.rot_z_spin.setValue(0.0)
 
         self.align_combo.blockSignals(False)
         self.offset_spin.blockSignals(False)
+        self.scale_spin.blockSignals(False) # Added scale_spin
         self.trim_in_spin.blockSignals(False)
         self.trim_out_spin.blockSignals(False)
         self.visible_cb.blockSignals(False)
         self.pos_x_spin.blockSignals(False)
         self.pos_y_spin.blockSignals(False)
         self.pos_z_spin.blockSignals(False)
+        self.rot_x_spin.blockSignals(False)
+        self.rot_y_spin.blockSignals(False)
+        self.rot_z_spin.blockSignals(False)
 
         self.joints_count_label.setText("")
         self.load_btn.setText("Load FBX/BVH")
@@ -479,6 +598,23 @@ class SingleTrackControls(QGroupBox):
             self.align_combo.setCurrentIndex(idx)
             self.align_combo.blockSignals(False)
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                path = urls[0].toLocalFile()
+                if path.lower().endswith(('.fbx', '.bvh')):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path.lower().endswith(('.fbx', '.bvh')):
+                self.file_dropped.emit(self.slot, path)
+                event.acceptProposedAction()
 
 # ---------------------------------------------------------------------------
 # Track Panel (scroll area)
@@ -490,6 +626,8 @@ class TrackPanel(QScrollArea):
     unload_requested = Signal(int)
     settings_changed = Signal(int)
     joints_changed = Signal(int, set)
+    auto_align_requested = Signal(int)
+    file_dropped = Signal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -510,6 +648,8 @@ class TrackPanel(QScrollArea):
             tc.unload_requested.connect(self.unload_requested.emit)
             tc.settings_changed.connect(self.settings_changed.emit)
             tc.joints_changed.connect(self.joints_changed.emit)
+            tc.auto_align_requested.connect(self.auto_align_requested.emit)
+            tc.file_dropped.connect(self.file_dropped.emit)
             self.track_controls.append(tc)
             layout.addWidget(tc)
 

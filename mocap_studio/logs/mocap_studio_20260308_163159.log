@@ -1,0 +1,8 @@
+2026-03-08 16:31:59.747 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 16:31:59.747 │ INFO    │ mocap_studio                   │ MoCap Align & Compare v0.1.0 starting
+2026-03-08 16:31:59.747 │ INFO    │ mocap_studio                   │ Log file: C:\Users\bxdpo\Desktop\VOC_MoCap_System\mocap_studio\logs\mocap_studio_20260308_163159.log
+2026-03-08 16:31:59.747 │ INFO    │ mocap_studio                   │ Python: 3.10.19 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 16:41:31) [MSC v.1929 64 bit (AMD64)]
+2026-03-08 16:31:59.748 │ INFO    │ mocap_studio                   │ Platform: win32
+2026-03-08 16:31:59.749 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-08 16:31:59.777 │ WARNING │ mocap_studio.main              │ Another instance is already running — exiting.
+2026-03-08 16:32:11.353 │ INFO    │ mocap_studio                   │ Exiting (duplicate instance).

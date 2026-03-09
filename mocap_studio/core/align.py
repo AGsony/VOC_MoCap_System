@@ -91,3 +91,45 @@ def resample_track(track: Track, target_frame_count: int) -> Track:
         visible=track.visible,
     )
     return new_track
+
+
+def auto_align_tracks(ref_track: Track, test_track: Track) -> float:
+    """
+    Find the optimal frame offset to align test_track to ref_track.
+    
+    This works by comparing the velocity magnitude of their 
+    alignment joints (usually the root/hips) over time using 
+    cross-correlation.
+
+    Returns
+    -------
+    float : The suggested frame offset for test_track.
+    """
+    if ref_track.positions is None or test_track.positions is None:
+        return 0.0
+
+    # Extract 3D positions for the alignment joint
+    ref_idx = ref_track.align_joint_index
+    test_idx = test_track.align_joint_index
+
+    ref_pos = ref_track.positions[:, ref_idx, :]
+    test_pos = test_track.positions[:, test_idx, :]
+
+    # Compute velocity magnitudes (speed)
+    ref_vel = np.linalg.norm(np.diff(ref_pos, axis=0), axis=1)
+    test_vel = np.linalg.norm(np.diff(test_pos, axis=0), axis=1)
+
+    # Normalize to mean=0, std=1 for cross-correlation
+    ref_vel = (ref_vel - np.mean(ref_vel)) / (np.std(ref_vel) + 1e-8)
+    test_vel = (test_vel - np.mean(test_vel)) / (np.std(test_vel) + 1e-8)
+
+    # Compute cross-correlation
+    # Full mode returns length = N + M - 1
+    corr = np.correlate(ref_vel, test_vel, mode='full')
+
+    # The peak of the correlation indicates the lag
+    # lag = argmax(corr) - (len(test) - 1)
+    peak_idx = np.argmax(corr)
+    optimal_lag = peak_idx - (len(test_vel) - 1)
+
+    return float(optimal_lag)

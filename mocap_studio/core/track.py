@@ -36,7 +36,8 @@ class Track:
     # shape (F, J, 4) — world-space quaternions (w, x, y, z)
 
     # --- user alignment state ---
-    offset: int = 0                 # frame offset (integer frames)
+    offset: float = 0.0             # frame offset (float for sub-frame accuracy)
+    scale: float = 1.0              # time scale / stretch
     trim_in: int = 0                # in-point frame
     trim_out: int = 0               # out-point frame (inclusive)
     align_joint: str = ""           # name of alignment joint
@@ -46,6 +47,11 @@ class Track:
     translate_x: float = 0.0
     translate_y: float = 0.0
     translate_z: float = 0.0
+
+    # --- 3D rotation offset (degrees) ---
+    rotate_x: float = 0.0
+    rotate_y: float = 0.0
+    rotate_z: float = 0.0
 
     # --- joint visibility ---
     hidden_joints: Set[str] = field(default_factory=set)
