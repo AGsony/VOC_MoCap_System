@@ -53,9 +53,9 @@ class TimelineWidget(QWidget):
         self._drag_start_val: float = 0.0
 
         # Layout constants
-        self.TRACK_HEIGHT = 18
+        self.TRACK_HEIGHT = 24
         self.TRACK_GAP = 6
-        self.MARGIN_TOP = 10
+        self.MARGIN_TOP = 24
         self.MARGIN_LEFT = 40
         self.MARGIN_RIGHT = 10
         self.HANDLE_WIDTH = 12
@@ -157,6 +157,33 @@ class TimelineWidget(QWidget):
         # Background
         painter.fillRect(0, 0, w, h, QColor(30, 30, 34))
 
+        # Ruler
+        painter.setPen(QColor(140, 140, 150))
+        font = QFont("Consolas", 8)
+        painter.setFont(font)
+        
+        if self._zoom >= 40:
+            label_step = 1
+        elif self._zoom >= 10:
+            label_step = 5
+        elif self._zoom >= 4:
+            label_step = 10
+        elif self._zoom >= 1:
+            label_step = 50
+        else:
+            label_step = 100
+
+        start_f = max(0, int(self._x_to_frame(self.MARGIN_LEFT)))
+        end_f = int(self._x_to_frame(w)) + 2
+
+        for f in range(start_f, end_f):
+            x = self._frame_to_x(f)
+            if self.MARGIN_LEFT <= x <= w:
+                painter.drawLine(int(x), self.MARGIN_TOP - 4, int(x), self.MARGIN_TOP - 1)
+                if f % label_step == 0:
+                    painter.drawLine(int(x), self.MARGIN_TOP - 12, int(x), self.MARGIN_TOP - 1)
+                    painter.drawText(int(x) + 2, self.MARGIN_TOP - 4, str(f))
+
         # Track bars
         for slot in range(5):
             y, dim_x, bright_x, bright_w = self._get_track_rects(slot)
@@ -200,6 +227,22 @@ class TimelineWidget(QWidget):
             # Handles
             painter.fillRect(bx, int(y), 2, self.TRACK_HEIGHT, QColor(255, 255, 255, 150))
             painter.fillRect(bx + bw - 2, int(y), 2, self.TRACK_HEIGHT, QColor(255, 255, 255, 150))
+            
+            # Interpolation indicators (Red Bars)
+            # Determine if track requires sub-frame interpolation
+            import math
+            if abs(td["scale"] - 1.0) > 1e-4 or abs(td["offset"] - round(td["offset"])) > 1e-4:
+                g_start = int(math.ceil(td["offset"] + td["trim_in"] * td["scale"]))
+                g_end = int(math.floor(td["offset"] + td["trim_out"] * td["scale"]))
+                
+                bar_thick = max(1, int(self._zoom * 0.2))
+                
+                for g_f in range(g_start, min(g_end + 1, self._max_frame)):
+                    local_f = (g_f - td["offset"]) / td["scale"]
+                    if abs(local_f - round(local_f)) > 1e-4:
+                        ix = self._frame_to_x(g_f)
+                        if self.MARGIN_LEFT <= ix <= w:
+                            painter.fillRect(int(ix) - bar_thick // 2, int(y), bar_thick, self.TRACK_HEIGHT, QColor(255, 50, 50, 255))
 
         # Scrubber line
         scrubber_y_start = self.MARGIN_TOP - 4
@@ -237,21 +280,30 @@ class TimelineWidget(QWidget):
     # Mouse interaction
     # ------------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent):
-        pos = event.position().toPoint()
+        x, y = event.x(), event.y()
         
+        # 1. Did we click the scrubber?
+        sx = self._frame_to_x(self._current_frame)
+        # Even if empty, allow grabbing
+        if abs(x - sx) < 12 and self.MARGIN_TOP - 10 <= y <= self.MARGIN_TOP + 5 * (24 + self.TRACK_GAP) + 20: # TRACK_HEIGHT changed from 18 to 24
+            self._drag_mode = "scrub"
+            return
+
+        # 2. Check track interaction
         if event.button() == Qt.MiddleButton:
             self._drag_mode = "pan"
-            self._last_mouse_x = pos.x()
+            self._last_mouse_x = x
             self.setCursor(Qt.ClosedHandCursor)
             
         elif event.button() == Qt.LeftButton:
-            mode, slot = self._hit_test(pos.x(), pos.y())
+            mode, slot = self._hit_test(x, y)
             self._drag_mode = mode
             self._drag_slot = slot
-            self._last_mouse_x = pos.x()
+            self._last_mouse_x = x
             
             if mode == "scrub":
-                self._update_scrub(pos.x())
+                # This case is handled above, but if _hit_test returns scrub for other reasons
+                self._update_scrub(x)
             elif mode == "offset" and slot >= 0:
                 self._drag_start_val = self._tracks[slot]["offset"]
                 self.setCursor(Qt.SizeAllCursor)
@@ -265,11 +317,11 @@ class TimelineWidget(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        pos = event.position().toPoint()
+        x, y = event.x(), event.y()
         
         # Hover cursors if not dragging
         if not self._drag_mode:
-            mode, _ = self._hit_test(pos.x(), pos.y())
+            mode, _ = self._hit_test(x, y)
             if mode in ("trim_in", "trim_out"):
                 self.setCursor(Qt.SizeHorCursor)
             elif mode == "offset":
@@ -278,16 +330,22 @@ class TimelineWidget(QWidget):
                 self.setCursor(Qt.ArrowCursor)
             return
 
-        dx = pos.x() - self._last_mouse_x
+        dx = x - self._last_mouse_x
         d_frame = dx / self._zoom
 
         if self._drag_mode == "pan":
             self._pan_x -= d_frame
-            self._last_mouse_x = pos.x()
+            self._last_mouse_x = x
             self.update()
             
         elif self._drag_mode == "scrub":
-            self._update_scrub(pos.x())
+            frame = int(round(self._x_to_frame(x)))
+            # Do NOT clamp to max_frame here so the user can drag arbitrarily far
+            frame = max(0, frame)
+            if frame != self._current_frame:
+                self._current_frame = frame
+                self.frame_changed.emit(frame)
+                self.update()
             
         elif self._drag_slot >= 0:
             td = self._tracks[self._drag_slot]

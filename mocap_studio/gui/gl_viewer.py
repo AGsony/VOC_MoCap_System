@@ -92,6 +92,7 @@ class GLViewer(QOpenGLWidget):
     # ------------------------------------------------------------------
     def set_track_data(self, slot: int, positions: Optional[np.ndarray],
                        bone_pairs: Optional[list], visible: bool = True,
+                       hidden_joints: Optional[set] = None,
                        translate: tuple = (0.0, 0.0, 0.0),
                        rotate: tuple = (0.0, 0.0, 0.0),
                        joint_names: Optional[list] = None):

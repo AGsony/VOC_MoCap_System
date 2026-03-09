@@ -68,6 +68,8 @@ def _do_load_fbx(fbx, manager, filepath: str, t_start: float) -> Track:
     if not importer.Initialize(filepath, -1, manager.GetIOSettings()):
         err_msg = importer.GetStatus().GetErrorString()
         log.error(f"FBX Importer initialization failed: {err_msg}")
+        importer.Destroy()
+        manager.Destroy()
         raise RuntimeError(f"FBX Importer failed: {err_msg}")
 
     scene = fbx.FbxScene.Create(manager, "scene")

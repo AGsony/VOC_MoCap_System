@@ -215,6 +215,7 @@ class SingleTrackControls(QGroupBox):
     joints_changed = Signal(int, set)  # slot, hidden_joints
     auto_align_requested = Signal(int) # slot
     file_dropped = Signal(int, str) # slot, path
+    rest_pose_requested = Signal(int) # slot
 
     def __init__(self, slot: int, parent=None):
         super().__init__(parent)
@@ -252,6 +253,11 @@ class SingleTrackControls(QGroupBox):
         self.load_btn.clicked.connect(lambda: self.load_requested.emit(self.slot))
         self.load_btn.setFixedHeight(26)
         row1.addWidget(self.load_btn)
+
+        self.rest_btn = QPushButton("Assign Rest Pose")
+        self.rest_btn.clicked.connect(lambda: self.rest_pose_requested.emit(self.slot))
+        self.rest_btn.setFixedHeight(26)
+        row1.addWidget(self.rest_btn)
 
         self.unload_btn = QPushButton("✕")
         self.unload_btn.setFixedWidth(26)
@@ -472,13 +478,15 @@ class SingleTrackControls(QGroupBox):
         self.rot_y_spin.setEnabled(enabled)
         self.rot_z_spin.setEnabled(enabled)
         self.joints_btn.setEnabled(enabled)
+        self.rest_btn.setEnabled(enabled)
 
     def set_loaded(self, name: str, joint_names: List[str],
                    frame_count: int, align_joint: str,
                    offset: float = 0.0, scale: float = 1.0,
                    trim_in: int = 0, trim_out: int = 0,
                    visible: bool = True, translate: tuple = (0.0, 0.0, 0.0),
-                   rotate: tuple = (0.0, 0.0, 0.0)):
+                   rotate: tuple = (0.0, 0.0, 0.0),
+                   rest_pose_name: str = ""):
         """Called after a track is loaded successfully."""
         self._loaded = True
         self._joint_names = joint_names
@@ -519,6 +527,13 @@ class SingleTrackControls(QGroupBox):
         self.rot_x_spin.setValue(rotate[0])
         self.rot_y_spin.setValue(rotate[1])
         self.rot_z_spin.setValue(rotate[2])
+
+        if rest_pose_name:
+            self.rest_btn.setText(f"Rest: {rest_pose_name}")
+            self.rest_btn.setToolTip(f"Rest Pose: {rest_pose_name}")
+        else:
+            self.rest_btn.setText("Assign Rest Pose")
+            self.rest_btn.setToolTip("Assign a reference frame 0 rest pose for exports")
 
         # Unblock all signals
         self.align_combo.blockSignals(False)
@@ -628,6 +643,7 @@ class TrackPanel(QScrollArea):
     joints_changed = Signal(int, set)
     auto_align_requested = Signal(int)
     file_dropped = Signal(int, str)
+    rest_pose_requested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -650,6 +666,7 @@ class TrackPanel(QScrollArea):
             tc.joints_changed.connect(self.joints_changed.emit)
             tc.auto_align_requested.connect(self.auto_align_requested.emit)
             tc.file_dropped.connect(self.file_dropped.emit)
+            tc.rest_pose_requested.connect(self.rest_pose_requested.emit)
             self.track_controls.append(tc)
             layout.addWidget(tc)
 

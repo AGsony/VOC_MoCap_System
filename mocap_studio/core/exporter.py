@@ -38,14 +38,20 @@ def export_timeline_to_bvh(session, filepath):
             interpolated_quat.append(quats)
 
         # 2. MOTION
+        export_frames = global_frames + 1
         f.write("MOTION\n")
-        f.write(f"Frames: {global_frames}\n")
+        f.write(f"Frames: {export_frames}\n")
         f.write(f"Frame Time: {1.0 / track.fps:.6f}\n")
 
-        for frame in range(global_frames):
+        for frame in range(-1, global_frames):
             line_parts = []
             for t_idx, track in enumerate(tracks):
-                line_parts.append(_compute_bvh_frame_channels(track, interpolated_pos[t_idx][frame], interpolated_quat[t_idx][frame]))
+                if frame == -1:
+                    r_pos = track.rest_pose_positions if track.rest_pose_positions is not None else track.positions[0]
+                    r_quat = track.rest_pose_quaternions if track.rest_pose_quaternions is not None else (track.quaternions[0] if track.quaternions is not None else None)
+                    line_parts.append(_compute_bvh_frame_channels(track, r_pos, r_quat))
+                else:
+                    line_parts.append(_compute_bvh_frame_channels(track, interpolated_pos[t_idx][frame], interpolated_quat[t_idx][frame]))
             
             f.write(" ".join(line_parts) + "\n")
 
@@ -195,7 +201,7 @@ def export_timeline_to_fbx(session, filepath):
     if not tracks:
         raise ValueError("No visible tracks to export.")
 
-    global_frames = session.max_frame
+    global_frames = int(session.max_frame)
     if global_frames <= 0:
         raise ValueError("Timeline is empty.")
 
@@ -212,7 +218,7 @@ def export_timeline_to_fbx(session, filepath):
         raise RuntimeError(f"FBX Exporter failed: {err}")
 
     scene = fbx.FbxScene.Create(manager, "Scene")
-    scene.GetGlobalSettings().SetTimeMode(fbx.FbxTime.eFrames60)
+    scene.GetGlobalSettings().SetTimeMode(fbx.FbxTime.EMode.eFrames60)
 
     anim_stack = fbx.FbxAnimStack.Create(scene, "TimelineStack")
     anim_layer = fbx.FbxAnimLayer.Create(scene, "BaseLayer")
@@ -227,8 +233,8 @@ def export_timeline_to_fbx(session, filepath):
         J = len(parents)
 
         # Get local matrices for all frames
-        world_r = R.from_quat(quats)
-        world_mats = world_r.as_matrix()  # (F, J, 3, 3)
+        world_r = R.from_quat(quats.reshape(-1, 4))
+        world_mats = world_r.as_matrix().reshape(global_frames, J, 3, 3)  # (F, J, 3, 3)
 
         local_mats = np.zeros((global_frames, J, 3, 3))
         for i in range(J):
@@ -247,10 +253,10 @@ def export_timeline_to_fbx(session, filepath):
             node = fbx.FbxNode.Create(scene, name)
             skeleton = fbx.FbxSkeleton.Create(scene, "skeleton")
             if parents[i] < 0:
-                skeleton.SetSkeletonType(fbx.FbxSkeleton.eRoot)
+                skeleton.SetSkeletonType(fbx.FbxSkeleton.EType.eRoot)
                 scene.GetRootNode().AddChild(node)
             else:
-                skeleton.SetSkeletonType(fbx.FbxSkeleton.eLimbNode)
+                skeleton.SetSkeletonType(fbx.FbxSkeleton.EType.eLimbNode)
                 fbx_nodes[parents[i]].AddChild(node)
             node.SetNodeAttribute(skeleton)
             fbx_nodes.append(node)
@@ -280,39 +286,65 @@ def export_timeline_to_fbx(session, filepath):
                 f0_pos[1] = 0.0
                 
             else:
-                offset = track.positions[0, i] - track.positions[0, parents[i]]
+                offset_val = track.positions[0, i] - track.positions[0, parents[i]]
                 
-            for f in range(global_frames):
-                fbx_time.SetFrame(f, fbx.FbxTime.eFrames60)
+            for f in range(-1, global_frames):
+                fbx_time.SetFrame(f + 1, fbx.FbxTime.EMode.eFrames60)
+
+                if f == -1:
+                    rp = track.rest_pose_positions if track.rest_pose_positions is not None else track.positions[0]
+                    rq = track.rest_pose_quaternions if track.rest_pose_quaternions is not None else (track.quaternions[0] if track.quaternions is not None else None)
+                    
+                    if is_root:
+                        rt = rp[i].copy()
+                    else:
+                        rt = None
+                        
+                    if rq is not None:
+                        w_r = R.from_quat(rq)
+                        w_m = w_r.as_matrix()
+                        p = parents[i]
+                        if p < 0:
+                            l_m = w_m[i]
+                        else:
+                            l_m = w_m[p].T @ w_m[i]
+                        r_eul = R.from_matrix(l_m).as_euler('xyz', degrees=True)
+                    else:
+                        r_eul = [0, 0, 0]
+
+                    p_f = rt
+                    e_f = r_eul
+                else:
+                    p_f = pos[f, i].copy() if is_root else None
+                    e_f = local_euler[f, i]
 
                 if is_root:
-                    rt = pos[f, i].copy()
-                    rt -= f0_pos
-                    rt = track_rot.apply(rt)
+                    p_f -= f0_pos
+                    p_f = track_rot.apply(p_f)
                     
-                    rt[0] += track.translate_x
-                    rt[1] += track.translate_y
-                    rt[2] += track.translate_z
+                    p_f[0] += track.translate_x
+                    p_f[1] += track.translate_y
+                    p_f[2] += track.translate_z
 
                     kx = curve_t_x.KeyAdd(fbx_time)[0]
-                    curve_t_x.KeySet(kx, fbx_time, float(rt[0]))
+                    curve_t_x.KeySet(kx, fbx_time, float(p_f[0]))
                     ky = curve_t_y.KeyAdd(fbx_time)[0]
-                    curve_t_y.KeySet(ky, fbx_time, float(rt[1]))
+                    curve_t_y.KeySet(ky, fbx_time, float(p_f[1]))
                     kz = curve_t_z.KeyAdd(fbx_time)[0]
-                    curve_t_z.KeySet(kz, fbx_time, float(rt[2]))
+                    curve_t_z.KeySet(kz, fbx_time, float(p_f[2]))
 
-                    rr = R.from_euler('xyz', local_euler[f, i], degrees=True)
+                    rr = R.from_euler('xyz', e_f, degrees=True)
                     final_e = (track_rot * rr).as_euler('xyz', degrees=True)
                     e_x, e_y, e_z = final_e
                 else:
                     kx = curve_t_x.KeyAdd(fbx_time)[0]
-                    curve_t_x.KeySet(kx, fbx_time, float(offset[0]))
+                    curve_t_x.KeySet(kx, fbx_time, float(offset_val[0]))
                     ky = curve_t_y.KeyAdd(fbx_time)[0]
-                    curve_t_y.KeySet(ky, fbx_time, float(offset[1]))
+                    curve_t_y.KeySet(ky, fbx_time, float(offset_val[1]))
                     kz = curve_t_z.KeyAdd(fbx_time)[0]
-                    curve_t_z.KeySet(kz, fbx_time, float(offset[2]))
+                    curve_t_z.KeySet(kz, fbx_time, float(offset_val[2]))
 
-                    e_x, e_y, e_z = local_euler[f, i]
+                    e_x, e_y, e_z = e_f
 
                 kx = curve_r_x.KeyAdd(fbx_time)[0]
                 curve_r_x.KeySet(kx, fbx_time, float(e_x))

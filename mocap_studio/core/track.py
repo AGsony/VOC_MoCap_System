@@ -35,6 +35,11 @@ class Track:
     quaternions: Optional[np.ndarray] = field(default=None, repr=False)
     # shape (F, J, 4) — world-space quaternions (w, x, y, z)
 
+    # --- rest pose injection ---
+    rest_pose_positions: Optional[np.ndarray] = field(default=None, repr=False)
+    rest_pose_quaternions: Optional[np.ndarray] = field(default=None, repr=False)
+    rest_pose_name: str = ""        # filename of the rest pose loaded
+
     # --- user alignment state ---
     offset: float = 0.0             # frame offset (float for sub-frame accuracy)
     scale: float = 1.0              # time scale / stretch

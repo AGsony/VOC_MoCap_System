@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QFileDialog, QComboBox, QStatusBar,
     QMenuBar, QMenu, QSpinBox, QMessageBox, QApplication,
-    QTabWidget,
+    QTabWidget, QScrollArea, QProgressDialog,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
         self._track_panel.joints_changed.connect(self._on_joints_changed)
         self._track_panel.auto_align_requested.connect(self._on_auto_align_requested)
         self._track_panel.file_dropped.connect(self._on_file_dropped)
+        self._track_panel.rest_pose_requested.connect(self._on_rest_pose_requested)
         top_splitter.addWidget(self._track_panel)
 
         top_splitter.setStretchFactor(0, 3)
@@ -221,10 +222,16 @@ class MainWindow(QMainWindow):
         bottom_splitter = QSplitter(Qt.Vertical)
 
         self._timeline = TimelineWidget()
+        self._timeline.setMinimumHeight(200)
         self._timeline.frame_changed.connect(self._on_timeline_frame_changed)
         self._timeline.track_offset_changed.connect(self._on_track_offset_changed)
         self._timeline.track_trim_changed.connect(self._on_track_trim_changed)
-        bottom_splitter.addWidget(self._timeline)
+        
+        timeline_scroll = QScrollArea()
+        timeline_scroll.setWidgetResizable(True)
+        timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        timeline_scroll.setWidget(self._timeline)
+        bottom_splitter.addWidget(timeline_scroll)
 
         bottom_tabs = QTabWidget()
         bottom_tabs.setTabPosition(QTabWidget.South)
@@ -262,13 +269,21 @@ class MainWindow(QMainWindow):
             log.debug("File dialog cancelled.")
             return
 
+        progress = QProgressDialog(f"Parsing '{os.path.basename(path)}'...", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Importing Track")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+
         try:
             track = _load_file(path)
         except Exception as e:
             log.error(f"Failed to load track into slot {slot}: {e}", exc_info=True)
+            progress.close()
             QMessageBox.critical(self, "Load Error", str(e))
             return
 
+        progress.close()
         self._session.load_track(slot, track)
         self._update_track_ui(slot)
         self._update_viewer()
@@ -278,19 +293,72 @@ class MainWindow(QMainWindow):
 
     def _on_file_dropped(self, slot: int, path: str):
         log.info(f"File dropped into slot {slot}: {path}")
+        
+        progress = QProgressDialog(f"Parsing '{os.path.basename(path)}'...", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Importing Track")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+        
         try:
             track = _load_file(path)
         except Exception as e:
             log.error(f"Failed to load dropped track into slot {slot}: {e}", exc_info=True)
+            progress.close()
             QMessageBox.critical(self, "Load Error", str(e))
             return
 
+        progress.close()
         self._session.load_track(slot, track)
         self._update_track_ui(slot)
         self._update_viewer()
         self._update_timeline()
         self._update_frame_range()
         self._update_status()
+
+    def _on_rest_pose_requested(self, slot: int):
+        track = self._session.tracks[slot]
+        if track is None: return
+        
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Assign Rest Pose File", "",
+            "MoCap Files (*.fbx *.bvh)"
+        )
+        if not path:
+            return
+
+        try:
+            filename = os.path.basename(path)
+            log.info(f"Loading rest pose from {filename} for slot {slot}")
+            
+            progress = QProgressDialog(f"Parsing '{filename}'...", "Cancel", 0, 0, self)
+            progress.setWindowTitle("Importing Rest Pose")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            QApplication.processEvents()
+            
+            from core.fbx_extract import load_fbx
+            from core.bvh_extract import load_bvh
+            
+            ext = path.lower().split('.')[-1]
+            if ext == 'fbx':
+                rest_track = load_fbx(path)
+            elif ext == 'bvh':
+                rest_track = load_bvh(path)
+            else:
+                progress.close()
+                raise ValueError("Unsupported file format for rest pose.")
+                
+            track.rest_pose_positions = rest_track.positions[0]
+            track.rest_pose_quaternions = rest_track.quaternions[0] if rest_track.quaternions is not None else None
+            track.rest_pose_name = filename
+            
+            progress.close()
+            self._update_track_ui(slot)
+            
+        except Exception as e:
+            log.error(f"Failed to load rest pose: {e}", exc_info=True)
+            QMessageBox.critical(self, "Load Error", f"Could not load rest pose:\n{e}")
 
     def _on_unload_track(self, slot: int):
         log.info(f"Unloading track from slot {slot}")
@@ -316,7 +384,9 @@ class MainWindow(QMainWindow):
             trim_in=track.trim_in,
             trim_out=track.trim_out,
             visible=track.visible,
-            translate=track.translate,
+            translate=(track.translate_x, track.translate_y, track.translate_z),
+            rotate=(track.rotate_x, track.rotate_y, track.rotate_z),
+            rest_pose_name=track.rest_pose_name,
         )
 
     # ------------------------------------------------------------------
