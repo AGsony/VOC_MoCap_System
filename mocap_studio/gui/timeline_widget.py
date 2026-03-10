@@ -289,7 +289,6 @@ class TimelineWidget(QWidget):
             
             # Interpolation indicators (Red Bars)
             # Determine if track requires sub-frame interpolation
-            # Determine if track requires sub-frame interpolation
             if abs(td["scale"] - 1.0) > 1e-4 or abs(td["offset"] - round(td["offset"])) > 1e-4:
                 g_start = int(math.ceil(td["offset"] + td["trim_in"] * td["scale"]))
                 g_end = int(math.floor(td["offset"] + td["trim_out"] * td["scale"]))

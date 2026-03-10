@@ -1,0 +1,17 @@
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+*.py[cod]
+__pycache__/
+
+# Executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*$py.class

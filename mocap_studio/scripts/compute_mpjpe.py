@@ -3,6 +3,12 @@
 # Usage: Load tracks, set reference, then run this script.
 # Output: MPJPE for each non-reference track.
 
+import numpy as np
+
+session = globals().get('session', None)
+if session is None:
+    raise RuntimeError("This script must be run from within MoCap Studio's Script Editor.")
+
 ref_idx = session.reference_index
 ref = session.tracks[ref_idx]
 

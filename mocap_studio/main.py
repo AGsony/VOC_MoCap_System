@@ -11,6 +11,12 @@ import logging
 import logging.handlers
 from datetime import datetime
 
+# Guarantee safe PyOpenGL platform bindings at runtime when frozen using PyInstaller
+os.environ['PYOPENGL_PLATFORM'] = 'win32'
+import OpenGL
+import OpenGL.platform.win32
+import OpenGL.arrays.numpymodule
+
 # Ensure the parent directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

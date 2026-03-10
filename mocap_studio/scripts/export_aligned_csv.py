@@ -12,6 +12,10 @@ os.makedirs(out_dir, exist_ok=True)
 print(f"Export directory: {out_dir}")
 print()
 
+session = globals().get('session', None)
+if session is None:
+    raise RuntimeError("This script must be run from within MoCap Studio's Script Editor.")
+
 for i, track in enumerate(session.tracks):
     if track is None:
         continue
