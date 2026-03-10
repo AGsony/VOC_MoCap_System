@@ -406,10 +406,31 @@ class GLViewer(QOpenGLWidget):
                 if j in hidden:
                     continue
 
+                # Extract properties
+                rx, ry, rz = td.get("rotate", (0.0, 0.0, 0.0))
+                
+                # Manual Euler Transformation (Z, Y, X order identical to OpenGL's glRotatef drawing)
+                x, y, z = joint_pos[j]
+                
+                if rx != 0.0 or ry != 0.0 or rz != 0.0:
+                    rrx, rry, rrz = math.radians(rx), math.radians(ry), math.radians(rz)
+                    
+                    # Rot Z
+                    cx, sx = math.cos(rrz), math.sin(rrz)
+                    x, y, z = x * cx - y * sx, x * sx + y * cx, z
+                    
+                    # Rot Y
+                    cx, sx = math.cos(rry), math.sin(rry)
+                    x, y, z = x * cx + z * sx, y, -x * sx + z * cx
+                    
+                    # Rot X
+                    cx, sx = math.cos(rrx), math.sin(rrx)
+                    x, y, z = x, y * cx - z * sx, y * sx + z * cx
+
                 # World position with translation
-                wx = joint_pos[j][0] + translate[0]
-                wy = joint_pos[j][1] + translate[1]
-                wz = joint_pos[j][2] + translate[2]
+                wx = x + translate[0]
+                wy = y + translate[1]
+                wz = z + translate[2]
 
                 # Project to screen
                 try:

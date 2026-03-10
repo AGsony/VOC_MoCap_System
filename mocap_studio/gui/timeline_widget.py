@@ -6,8 +6,9 @@ and full mouse interaction (scrub, drag offset, trim in/out, pan, zoom).
 from __future__ import annotations
 
 from typing import List, Optional, Tuple
+import math
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QScrollBar
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QWheelEvent, QCursor
 
@@ -31,12 +32,12 @@ class TimelineWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(100)
-        self.setMaximumHeight(180)
+        self.setMaximumHeight(200)
 
         self._current_frame: int = 0
         self._max_frame: int = 100
 
-        # Per-track: (frame_count, offset, trim_in, trim_out, visible)
+        # Per-track: (frame_count, offset, track_scale, trim_in, trim_out, visible)
         self._tracks: List[Optional[dict]] = [None] * 5
 
         self.setMouseTracking(True)
@@ -60,26 +61,68 @@ class TimelineWidget(QWidget):
         self.MARGIN_RIGHT = 10
         self.HANDLE_WIDTH = 12
 
+        self.h_scrollbar = QScrollBar(Qt.Horizontal, self)
+        self.h_scrollbar.valueChanged.connect(self._on_scrollbar_scrolled)
+        self.h_scrollbar.setCursor(Qt.ArrowCursor)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def _on_scrollbar_scrolled(self, value):
+        self._pan_x = value
+        self.update()
+
+    def _update_scrollbar_range(self):
+        w = self.width() - self.MARGIN_LEFT - self.MARGIN_RIGHT
+        if w <= 0 or self._zoom <= 0:
+            return
+            
+        visible_frames = w / self._zoom
+        max_pan = max(0.0, self._max_frame - visible_frames)
+        
+        # Scrollbar works with integers
+        self.h_scrollbar.setRange(0, int(math.ceil(max_pan)))
+        self.h_scrollbar.setPageStep(int(visible_frames))
+        
+        # Keep pan_x within bounds
+        self._pan_x = max(0.0, min(self._pan_x, max_pan))
+        
+        self.h_scrollbar.blockSignals(True)
+        self.h_scrollbar.setValue(int(self._pan_x))
+        self.h_scrollbar.blockSignals(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        h = self.height()
+        self.h_scrollbar.setGeometry(self.MARGIN_LEFT, h - 14, w - self.MARGIN_LEFT, 14)
+        self._update_scrollbar_range()
+
     def set_max_frame(self, mf: int):
         self._max_frame = max(1, mf)
         # Auto-fit zoom on first load if we haven't manipulated it
         w = self.width() - self.MARGIN_LEFT - self.MARGIN_RIGHT
         if w > 0:
             self._zoom = w / self._max_frame
+        self._update_scrollbar_range()
         self.update()
 
     def set_current_frame(self, frame: int):
         self._current_frame = frame
+        w = self.width() - self.MARGIN_LEFT - self.MARGIN_RIGHT
+        if w > 0 and self._zoom > 0:
+            visible_frames = w / self._zoom
+            if frame < self._pan_x or frame > self._pan_x + visible_frames:
+                self._pan_x = max(0.0, frame - visible_frames / 2.0)
+                self._update_scrollbar_range()
         self.update()
 
-    def set_track_info(self, slot: int, frame_count: int, offset: float,
+    def set_track_info(self, slot: int, frame_count: int, offset: float, scale: float,
                        trim_in: int, trim_out: int, visible: bool):
         self._tracks[slot] = {
             "frame_count": frame_count,
             "offset": offset,
+            "scale": scale,
             "trim_in": trim_in,
             "trim_out": trim_out,
             "visible": visible,
@@ -154,24 +197,40 @@ class TimelineWidget(QWidget):
         w = self.width()
         h = self.height()
 
-        # Background
-        painter.fillRect(0, 0, w, h, QColor(30, 30, 34))
+        # Background timeline track area
+        painter.fillRect(self.MARGIN_LEFT, 0, w - self.MARGIN_LEFT, h, QColor(30, 30, 34))
+        
+        # Title/Track Name break section
+        painter.fillRect(0, 0, self.MARGIN_LEFT, h, QColor(22, 22, 26))
+        painter.setPen(QColor(100, 100, 110))
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        painter.drawText(4, 16, "Tracks")
+        
+        # Vertical divider line
+        painter.setPen(QColor(50, 50, 60))
+        painter.drawLine(self.MARGIN_LEFT, 0, self.MARGIN_LEFT, h)
 
         # Ruler
         painter.setPen(QColor(140, 140, 150))
         font = QFont("Consolas", 8)
         painter.setFont(font)
         
-        if self._zoom >= 40:
-            label_step = 1
-        elif self._zoom >= 10:
-            label_step = 5
-        elif self._zoom >= 4:
-            label_step = 10
-        elif self._zoom >= 1:
-            label_step = 50
+        min_pixels_between_labels = 45.0
+        min_frames = min_pixels_between_labels / max(0.0001, self._zoom)
+        
+        magnitude = 10 ** math.floor(math.log10(max(1, min_frames))) if min_frames > 0 else 1
+        val = min_frames / magnitude if magnitude > 0 else 1
+        
+        if val <= 1:
+            label_step = 1 * magnitude
+        elif val <= 2:
+            label_step = 2 * magnitude
+        elif val <= 5:
+            label_step = 5 * magnitude
         else:
-            label_step = 100
+            label_step = 10 * magnitude
+            
+        label_step = max(1, int(label_step))
 
         start_f = max(0, int(self._x_to_frame(self.MARGIN_LEFT)))
         end_f = int(self._x_to_frame(w)) + 2
@@ -230,7 +289,7 @@ class TimelineWidget(QWidget):
             
             # Interpolation indicators (Red Bars)
             # Determine if track requires sub-frame interpolation
-            import math
+            # Determine if track requires sub-frame interpolation
             if abs(td["scale"] - 1.0) > 1e-4 or abs(td["offset"] - round(td["offset"])) > 1e-4:
                 g_start = int(math.ceil(td["offset"] + td["trim_in"] * td["scale"]))
                 g_end = int(math.floor(td["offset"] + td["trim_out"] * td["scale"]))
@@ -249,7 +308,7 @@ class TimelineWidget(QWidget):
         scrubber_y_end = self.MARGIN_TOP + 5 * (self.TRACK_HEIGHT + self.TRACK_GAP) + 4
         
         scrub_x = self._frame_to_x(self._current_frame)
-        if self.MARGIN_LEFT <= scrub_x <= w:
+        if self.MARGIN_LEFT - 1 <= scrub_x <= w + 1:
             pen = QPen(QColor(255, 255, 255, 200), 2)
             painter.setPen(pen)
             painter.drawLine(int(scrub_x), int(scrubber_y_start), int(scrub_x), int(scrubber_y_end))
@@ -272,7 +331,7 @@ class TimelineWidget(QWidget):
         font = QFont("Consolas", 9)
         painter.setFont(font)
         frame_text = f"Frame: {self._current_frame} / {self._max_frame}"
-        painter.drawText(self.MARGIN_LEFT, h - 6, frame_text)
+        painter.drawText(self.MARGIN_LEFT, h - 18, frame_text)
 
         painter.end()
 
@@ -335,6 +394,7 @@ class TimelineWidget(QWidget):
 
         if self._drag_mode == "pan":
             self._pan_x -= d_frame
+            self._update_scrollbar_range()
             self._last_mouse_x = x
             self.update()
             
@@ -381,9 +441,16 @@ class TimelineWidget(QWidget):
         self._drag_mode = ""
         self._drag_slot = -1
         self.setCursor(Qt.ArrowCursor)
-        # One final update to ensure layout is perfect
         self.update()
         event.accept()
+
+    def _update_scrub(self, x: float):
+        frame = int(round(self._x_to_frame(x)))
+        frame = max(0, frame)
+        if frame != self._current_frame:
+            self._current_frame = frame
+            self.frame_changed.emit(frame)
+            self.update()
 
     def wheelEvent(self, event: QWheelEvent):
         # Zoom in/out based on mouse position
@@ -399,10 +466,11 @@ class TimelineWidget(QWidget):
         frame_at_mouse = self._x_to_frame(mouse_x)
         self._zoom *= factor
         # Max zoom: 50 pixels per frame. Min zoom: fit 100000 frames in window
-        self._zoom = max(0.001, min(50.0, self._zoom))
+        self._zoom = max(0.005, min(50.0, self._zoom))
         
         # Adjust pan so the same frame is under the mouse
         self._pan_x = frame_at_mouse - ((mouse_x - self.MARGIN_LEFT) / self._zoom)
+        self._update_scrollbar_range()
         self.update()
         event.accept()
 

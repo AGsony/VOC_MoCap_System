@@ -378,17 +378,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="'core.exporter'"></a>
-  <a target="code" href="" type="text/plain"><tt>'core.exporter'</tt></a>
-<span class="moduletype">MissingModule</span>  <div class="import">
-imported by:
-    <a href="#mocap_studio.gui.main_window">mocap_studio.gui.main_window</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="'cupy.cuda'"></a>
   <a target="code" href="" type="text/plain"><tt>'cupy.cuda'</tt></a>
 <span class="moduletype">MissingModule</span>  <div class="import">
@@ -13777,7 +13766,8 @@ imported by:
   <a name="fbx"></a>
   <tt>fbx</tt> <span class="moduletype"><tt>C:\Users\bxdpo\Miniconda3\envs\mocap_studio\lib\site-packages\fbx.cp310-win_amd64.pyd</tt></span>  <div class="import">
 imported by:
-    <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
+    <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
+ &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
 
   </div>
 
@@ -15236,6 +15226,7 @@ imported by:
  &#8226;   <a href="#logging.handlers">logging.handlers</a>
  &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
  &#8226;   <a href="#mocap_studio.core.session">mocap_studio.core.session</a>
  &#8226;   <a href="#mocap_studio.gui.console_widget">mocap_studio.gui.console_widget</a>
@@ -15329,6 +15320,7 @@ imported by:
  &#8226;   <a href="#asyncio.windows_events">asyncio.windows_events</a>
  &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#fractions">fractions</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.gui.gl_viewer">mocap_studio.gui.gl_viewer</a>
  &#8226;   <a href="#mocap_studio.gui.timeline_widget">mocap_studio.gui.timeline_widget</a>
  &#8226;   <a href="#numpy._core._internal">numpy._core._internal</a>
@@ -15460,6 +15452,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
  &#8226;   <a href="#mocap_studio.core.session">mocap_studio.core.session</a>
  &#8226;   <a href="#mocap_studio.core.skeleton">mocap_studio.core.skeleton</a>
@@ -15485,6 +15478,28 @@ imports:
  &#8226;   <a href="#scipy.spatial.transform">scipy.spatial.transform</a>
  &#8226;   <a href="#time">time</a>
  &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#mocap_studio.gui.main_window">mocap_studio.gui.main_window</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="mocap_studio.core.exporter"></a>
+  <a target="code" href="///C:/Users/bxdpo/Desktop/VOC_MoCap_System/mocap_studio/core/exporter.py" type="text/plain"><tt>mocap_studio.core.exporter</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#fbx">fbx</a>
+ &#8226;   <a href="#logging">logging</a>
+ &#8226;   <a href="#math">math</a>
+ &#8226;   <a href="#mocap_studio.core">mocap_studio.core</a>
+ &#8226;   <a href="#numpy">numpy</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#scipy.spatial.transform">scipy.spatial.transform</a>
 
   </div>
   <div class="import">
@@ -15662,7 +15677,6 @@ imported by:
 imports:
     <a href="#'core.align'">'core.align'</a>
  &#8226;   <a href="#'core.bvh_extract'">'core.bvh_extract'</a>
- &#8226;   <a href="#'core.exporter'">'core.exporter'</a>
  &#8226;   <a href="#PySide6.QtCore">PySide6.QtCore</a>
  &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
  &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
@@ -15670,6 +15684,7 @@ imports:
  &#8226;   <a href="#core">core</a>
  &#8226;   <a href="#logging">logging</a>
  &#8226;   <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
  &#8226;   <a href="#mocap_studio.core.session">mocap_studio.core.session</a>
  &#8226;   <a href="#mocap_studio.core.skeleton">mocap_studio.core.skeleton</a>
@@ -16969,6 +16984,7 @@ imported by:
  &#8226;   <a href="#OpenGL.arrays.numpymodule">OpenGL.arrays.numpymodule</a>
  &#8226;   <a href="#OpenGL.arrays.vbo">OpenGL.arrays.vbo</a>
  &#8226;   <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
  &#8226;   <a href="#mocap_studio.core.track">mocap_studio.core.track</a>
  &#8226;   <a href="#mocap_studio.gui.gl_viewer">mocap_studio.gui.gl_viewer</a>
@@ -24005,6 +24021,7 @@ imported by:
  &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#mimetypes">mimetypes</a>
  &#8226;   <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.core.fbx_extract">mocap_studio.core.fbx_extract</a>
  &#8226;   <a href="#mocap_studio.core.session">mocap_studio.core.session</a>
  &#8226;   <a href="#mocap_studio.gui.main_window">mocap_studio.gui.main_window</a>
@@ -34775,6 +34792,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#mocap_studio.core.bvh_extract">mocap_studio.core.bvh_extract</a>
+ &#8226;   <a href="#mocap_studio.core.exporter">mocap_studio.core.exporter</a>
  &#8226;   <a href="#mocap_studio.gui.script_editor">mocap_studio.gui.script_editor</a>
  &#8226;   <a href="#scipy.spatial">scipy.spatial</a>
  &#8226;   <a href="#scipy.spatial.transform">scipy.spatial.transform</a>

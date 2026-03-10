@@ -550,6 +550,7 @@ class MainWindow(QMainWindow):
                 track.visible,
                 hidden_joints=track.hidden_joint_indices,
                 translate=track.translate,
+                rotate=(track.rotate_x, track.rotate_y, track.rotate_z),
                 joint_names=track.skeleton.joint_names,
             )
 
@@ -568,6 +569,7 @@ class MainWindow(QMainWindow):
                 slot,
                 track.frame_count,
                 track.offset,
+                track.scale,
                 track.trim_in,
                 track.trim_out,
                 track.visible,
@@ -617,10 +619,10 @@ class MainWindow(QMainWindow):
             
         try:
             if path.lower().endswith('.fbx'):
-                from core.exporter import export_timeline_to_fbx
+                from mocap_studio.core.exporter import export_timeline_to_fbx
                 export_timeline_to_fbx(self._session, path)
             else:
-                from core.exporter import export_timeline_to_bvh
+                from mocap_studio.core.exporter import export_timeline_to_bvh
                 export_timeline_to_bvh(self._session, path)
                 
             QMessageBox.information(self, "Export Timeline", f"Successfully exported timeline to:\n{path}")
@@ -664,17 +666,20 @@ class MainWindow(QMainWindow):
     def _on_play(self):
         log.info(f"Playback started (speed={self._playback_speed}x)")
         self._playing = True
+        self._play_btn.setText("⏸ Pause")
         self._play_timer.start()
 
     def _on_pause(self):
         log.info(f"Playback paused at frame {self._session.current_frame}")
         self._playing = False
+        self._play_btn.setText("▶ Play")
         self._play_timer.stop()
         self._play_btn.setEnabled(True)
 
     def _on_stop(self):
         log.info("Playback stopped, reset to frame 0")
         self._playing = False
+        self._play_btn.setText("▶ Play")
         self._play_timer.stop()
         self._play_btn.setEnabled(True)
         self._set_frame(0)
@@ -691,7 +696,7 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         """Keyboard shortcuts for playback."""
         if event.key() == Qt.Key_Space:
-            if self._play_timer.isActive():
+            if self._playing:
                 self._on_pause()
             else:
                 self._on_play()
@@ -703,6 +708,12 @@ class MainWindow(QMainWindow):
         elif event.key() == Qt.Key_Right:
             step = 10 if event.modifiers() == Qt.ShiftModifier else 1
             self._set_frame(self._session.current_frame + step)
+            event.accept()
+        elif event.key() == Qt.Key_Home:
+            self._set_frame(0)
+            event.accept()
+        elif event.key() == Qt.Key_End:
+            self._set_frame(self._session.max_frame - 1)
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -762,24 +773,5 @@ class MainWindow(QMainWindow):
         self._status_label.setText(f"Session loaded: {os.path.basename(path)}")
 
     # ------------------------------------------------------------------
-    # Keyboard shortcuts
+    # Keyboard shortcuts handled in top-level keyPressEvent above
     # ------------------------------------------------------------------
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key == Qt.Key_Space:
-            if self._playing:
-                self._on_pause()
-            else:
-                self._on_play()
-        elif key == Qt.Key_Right:
-            step = 10 if event.modifiers() & Qt.ShiftModifier else 1
-            self._set_frame(self._session.current_frame + step)
-        elif key == Qt.Key_Left:
-            step = 10 if event.modifiers() & Qt.ShiftModifier else 1
-            self._set_frame(self._session.current_frame - step)
-        elif key == Qt.Key_Home:
-            self._set_frame(0)
-        elif key == Qt.Key_End:
-            self._set_frame(self._session.max_frame - 1)
-        else:
-            super().keyPressEvent(event)
