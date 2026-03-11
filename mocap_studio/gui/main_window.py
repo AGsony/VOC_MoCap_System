@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QScrollArea, QProgressDialog, QCheckBox,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence
 
 import numpy as np
 
@@ -174,14 +174,13 @@ class MainWindow(QMainWindow):
         controls_layout.setSpacing(6)
 
         self._play_btn = QPushButton("▶ Play")
-        self._play_btn.setFixedWidth(80)
-        self._play_btn.clicked.connect(self._on_play)
+        self._play_btn.setFixedWidth(100)
+        self._play_btn.setFocusPolicy(Qt.NoFocus)
+        self._play_btn.clicked.connect(self._toggle_playback)
         controls_layout.addWidget(self._play_btn)
-
-        self._pause_btn = QPushButton("⏸ Pause")
-        self._pause_btn.setFixedWidth(80)
-        self._pause_btn.clicked.connect(self._on_pause)
-        controls_layout.addWidget(self._pause_btn)
+        
+        self._space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
+        self._space_shortcut.activated.connect(self._toggle_playback)
 
         self._stop_btn = QPushButton("⏹ Stop")
         self._stop_btn.setFixedWidth(80)
@@ -745,6 +744,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Playback Control
     # ------------------------------------------------------------------
+    def _toggle_playback(self):
+        if self._playing:
+            self._on_pause()
+        else:
+            self._on_play()
+
     def _on_play(self):
         log.info(f"Playback started (speed={self._playback_speed}x)")
         self._playing = True
@@ -778,10 +783,7 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         """Keyboard shortcuts for playback."""
         if event.key() == Qt.Key_Space:
-            if self._playing:
-                self._on_pause()
-            else:
-                self._on_play()
+            # Spacebar is now safely handled by QShortcut
             event.accept()
         elif event.key() == Qt.Key_Left:
             step = 10 if event.modifiers() == Qt.ShiftModifier else 1

@@ -1,5 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
+version_file = 'version.txt'
+if not os.path.exists(version_file):
+    current_version = '1.0.0'
+else:
+    with open(version_file, 'r') as f:
+        current_version = f.read().strip()
+    
+    parts = current_version.split('.')
+    if len(parts) == 3:
+        major, minor, patch = parts
+        patch = str(int(patch) + 1)
+        current_version = f"{major}.{minor}.{patch}"
+    
+with open(version_file, 'w') as f:
+    f.write(current_version)
+
+exe_name = f'MoCapStudio_v2_{current_version}'
 
 a = Analysis(
     ['mocap_studio\\main.py'],
@@ -23,7 +41,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MoCapStudio_v2',
+    name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

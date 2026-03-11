@@ -1,0 +1,7 @@
+2026-03-11 15:27:23.733 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-11 15:27:23.734 │ INFO    │ mocap_studio                   │ MoCap Align & Compare v0.1.0 starting
+2026-03-11 15:27:23.734 │ INFO    │ mocap_studio                   │ Log file: C:\Users\bxdpo\Desktop\VOC_MoCap_System\mocap_studio\logs\mocap_studio_20260311_152723.log
+2026-03-11 15:27:23.734 │ INFO    │ mocap_studio                   │ Python: 3.13.5 | packaged by Anaconda, Inc. | (main, Jun 12 2025, 16:37:03) [MSC v.1929 64 bit (AMD64)]
+2026-03-11 15:27:23.734 │ INFO    │ mocap_studio                   │ Platform: win32
+2026-03-11 15:27:23.734 │ INFO    │ mocap_studio                   │ ============================================================
+2026-03-11 15:27:23.755 │ WARNING │ mocap_studio                   │ Unsupported Python version: 3.13.5 | packaged by Anaconda, Inc. | (main, Jun 12 2025, 16:37:03) [MSC v.1929 64 bit (AMD64)]

@@ -288,6 +288,20 @@ class TimelineWidget(QWidget):
             painter.fillRect(bx, int(y), 2, self.TRACK_HEIGHT, QColor(255, 255, 255, 80))
             painter.fillRect(bx + bw - 2, int(y), 2, self.TRACK_HEIGHT, QColor(255, 255, 255, 80))
             
+            # Handle frame labels
+            g_start = int(round(td["offset"] + td["trim_in"] * td["scale"]))
+            g_end = int(round(td["offset"] + td["trim_out"] * td["scale"]))
+            
+            painter.setPen(QColor(100, 200, 255, 230))
+            font = QFont("Segoe UI", 9, QFont.Bold)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            
+            start_str = str(g_start)
+            start_w = fm.horizontalAdvance(start_str)
+            painter.drawText(bx - start_w - 4, int(y + self.TRACK_HEIGHT - 6), start_str)
+            painter.drawText(bx + bw + 6, int(y + self.TRACK_HEIGHT - 6), str(g_end))
+            
             # Interpolation indicators (Red Bars)
             # Determine if track requires sub-frame interpolation
             if abs(td["scale"] - 1.0) > 1e-4 or abs(td["offset"] - round(td["offset"])) > 1e-4:
