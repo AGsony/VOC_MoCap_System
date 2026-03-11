@@ -148,6 +148,39 @@ def check_single_instance(app: QApplication) -> QSharedMemory:
     return shared_mem
 
 
+def check_system_requirements(app: QApplication, log: logging.Logger) -> bool:
+    """
+    Verify Python 3.10 and the FBX SDK exist. Show a popup and return False if they do not.
+    """
+    if sys.version_info.major != 3 or sys.version_info.minor != 10:
+        log.warning(f"Unsupported Python version: {sys.version}")
+        QMessageBox.warning(
+            None,
+            "Unsupported Python Version",
+            f"MoCap Studio requires Python 3.10.x to interface with the Autodesk FBX SDK natively.\n\n"
+            f"You are currently running: Python {sys.version.split()[0]}.\n"
+            f"Please run this software in a Python 3.10 Conda environment.",
+        )
+        return False
+        
+    try:
+        import fbx
+    except ImportError:
+        log.warning("FBX SDK not found during startup check.")
+        QMessageBox.critical(
+            None,
+            "Missing Dependencies: Autodesk FBX SDK",
+            "The Autodesk FBX Python SDK was not found on your system. "
+            "MoCap Studio cannot launch without it.\n\n"
+            "1. Download the Python 3.10 Windows Wheel (.whl) from the Autodesk FBX Developer site.\n"
+            "2. Install it in your current environment using:\n\n"
+            "     pip install <filename>.whl\n\n"
+            "Application will now exit.",
+        )
+        return False
+        
+    return True
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -160,6 +193,10 @@ def main():
     app.setApplicationName("MoCap Align & Compare")
     app.setOrganizationName("VOC MoCap")
     app.setApplicationVersion("0.1.0")
+
+    # --- System Requirements check ---
+    if not check_system_requirements(app, log):
+        sys.exit(1)
 
     # --- Single-instance check ---
     shared_mem = check_single_instance(app)

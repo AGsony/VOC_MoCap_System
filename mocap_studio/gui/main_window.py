@@ -485,20 +485,69 @@ class MainWindow(QMainWindow):
     def _on_auto_align_requested(self, slot: int):
         ref_idx = self._session.reference_index
         if slot == ref_idx:
-            QMessageBox.information(self, "Auto-Align", "Cannot auto-align the reference track to itself.")
+            QMessageBox.information(self, "Auto-Sync", "Cannot auto-sync the reference track to itself.")
+            log.warning(f"Auto-Sync aborted: Target Track {slot+1} is set as the Reference Track.")
             return
             
         ref_track = self._session.tracks[ref_idx]
         test_track = self._session.tracks[slot]
         
         if not ref_track or not test_track:
+            QMessageBox.warning(self, "Auto-Sync", "Both reference track and target track must be loaded.")
+            log.warning("Auto-Sync aborted: Missing reference or target track.")
             return
             
-        from core.align import auto_align_tracks
-        optimal_offset = auto_align_tracks(ref_track, test_track)
-        
-        log.info(f"Auto-align track {slot} -> {optimal_offset} offset")
-        self._on_track_offset_changed(slot, optimal_offset)
+        try:
+            from core.align import auto_align_tracks
+            import numpy as np
+            optimal_offset = auto_align_tracks(ref_track, test_track)
+            
+            log.info(f"Auto-Sync Complete: Track {slot+1} algorithmic offset calculated as {optimal_offset} frames relative to Track {ref_idx+1}.")
+            
+            # --- Phase 6: 3D Spatial Position Overlap ---
+            if ref_track.positions is not None and test_track.positions is not None:
+                ref_joint_idx = ref_track.align_joint_index
+                test_joint_idx = test_track.align_joint_index
+                
+                # Fetch reference start location
+                ref_pos_0 = ref_track.positions[0, ref_joint_idx, :].copy()
+                
+                # Map target track's local interpolation time relative to optimal_offset
+                test_frame_float = -optimal_offset / test_track.scale
+                test_frame_int = int(max(0, min(test_frame_float, test_track.frame_count - 1)))
+                
+                test_pos_0 = test_track.positions[test_frame_int, test_joint_idx, :].copy()
+                
+                # Calculate required spatial delta overlap
+                delta = ref_pos_0 - test_pos_0
+                
+                # Expose coordinates physically up the native PySide6 layout layer
+                tc = self._track_panel.track_controls[slot]
+                
+                tc.pos_x_spin.blockSignals(True)
+                tc.pos_y_spin.blockSignals(True)
+                tc.pos_z_spin.blockSignals(True)
+                
+                tc.pos_x_spin.setValue(delta[0])
+                tc.pos_y_spin.setValue(delta[1])
+                tc.pos_z_spin.setValue(delta[2])
+                
+                test_track.translate_x = delta[0]
+                test_track.translate_y = delta[1]
+                test_track.translate_z = delta[2]
+                
+                tc.pos_x_spin.blockSignals(False)
+                tc.pos_y_spin.blockSignals(False)
+                tc.pos_z_spin.blockSignals(False)
+            
+            # Flush global timeline configurations
+            self._on_track_offset_changed(slot, optimal_offset)
+            
+            QMessageBox.information(self, "Auto-Sync Complete", f"Successfully aligned Track {slot+1} to Reference Track {ref_idx+1}.\n\nApplied Timeline Offset: {optimal_offset} frames.\nApplied 3D Translation offsets (X/Y/Z).")
+            
+        except Exception as e:
+            log.error(f"Auto-Sync algorithm failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Auto-Sync Error", f"The alignment algorithm encountered a fatal error:\n{e}")
 
     def _on_joint_selected(self, slot: int, joint_index: int, joint_name: str):
         """Handle bone picking from the 3D viewer."""

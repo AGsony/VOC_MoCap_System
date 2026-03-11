@@ -58,9 +58,16 @@ def export_timeline_to_bvh(session, filepath, progress_callback=None):
             if progress_callback and frame % 10 == 0:
                 percent = int(((frame + 1) / export_frames) * 100)
                 if progress_callback(percent):
-                    break
+                    f.close()
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+                    log.warning("BVH Export cancelled by user. Partial file deleted.")
+                    return False
 
     log.info("BVH Export complete.")
+    return True
 
 def _write_bvh_hierarchy(f, track, t_idx):
     def write_node(j_idx, depth):
@@ -223,11 +230,12 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
         raise RuntimeError(f"FBX Exporter failed: {err}")
 
     scene = fbx.FbxScene.Create(manager, "Scene")
-    scene.GetGlobalSettings().SetTimeMode(fbx.FbxTime.EMode.eFrames60)
-
-    anim_stack = fbx.FbxAnimStack.Create(scene, "TimelineStack")
-    anim_layer = fbx.FbxAnimLayer.Create(scene, "BaseLayer")
-    anim_stack.AddMember(anim_layer)
+    try:
+        scene.GetGlobalSettings().SetTimeMode(fbx.FbxTime.EMode.eFrames60)
+    
+        anim_stack = fbx.FbxAnimStack.Create(scene, "TimelineStack")
+        anim_layer = fbx.FbxAnimLayer.Create(scene, "BaseLayer")
+        anim_stack.AddMember(anim_layer)
 
     fbx_time = fbx.FbxTime()
 
@@ -372,9 +380,17 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
             if progress_callback:
                 percent = int(((t_idx + 1) / len(tracks)) * 100)
                 if progress_callback(percent):
-                    break
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+                    log.warning("FBX Export cancelled by user. Partial file deleted.")
+                    return False
 
-    exporter.Export(scene)
-    exporter.Destroy()
-    manager.Destroy()
-    log.info("FBX Export complete.")
+        exporter.Export(scene)
+        log.info("FBX Export complete.")
+        return True
+        
+    finally:
+        exporter.Destroy()
+        manager.Destroy()
