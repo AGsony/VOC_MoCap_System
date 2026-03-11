@@ -26,6 +26,8 @@ log = logging.getLogger("mocap_studio.core.fbx_extract")
 def _try_import_fbx():
     """Try importing the FBX SDK; return (fbx_module, FbxManager) or (None, None)."""
     try:
+        # CRITICAL: If building with PyInstaller, 'fbx' and 'FbxCommon' MUST be in hiddenimports
+        # within the .spec file. Also, the build environment MUST use Python 3.10.
         import fbx  # type: ignore
         manager = fbx.FbxManager.Create()
         log.debug("FBX SDK imported successfully.")

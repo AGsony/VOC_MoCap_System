@@ -6,7 +6,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['PySide6', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'numpy', 'OpenGL', 'OpenGL.GL', 'OpenGL.GLU', 'OpenGL.platform.win32', 'OpenGL.arrays.numpymodule'],
+    # CRITICAL: 'fbx' and 'FbxCommon' MUST be explicitly included in hiddenimports.
+    # Additionally, ensure the build environment uses Python 3.10 (for FBX SDK support).
+    hiddenimports=['PySide6', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'numpy', 'OpenGL', 'OpenGL.GL', 'OpenGL.GLU', 'OpenGL.platform.win32', 'OpenGL.arrays.numpymodule', 'fbx', 'FbxCommon'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

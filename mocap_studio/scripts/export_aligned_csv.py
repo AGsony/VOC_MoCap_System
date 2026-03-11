@@ -38,6 +38,10 @@ for i, track in enumerate(session.tracks):
 
         # Data rows
         for frame in range(track.frame_count):
+            if frame % 100 == 0:
+                from PySide6.QtWidgets import QApplication
+                QApplication.processEvents()
+                
             row = [frame]
             for j in range(len(track.skeleton.joint_names)):
                 p = aligned[frame, j]

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QFileDialog, QComboBox, QStatusBar,
     QMenuBar, QMenu, QSpinBox, QMessageBox, QApplication,
-    QTabWidget, QScrollArea, QProgressDialog,
+    QTabWidget, QScrollArea, QProgressDialog, QCheckBox,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
@@ -82,11 +82,18 @@ class MainWindow(QMainWindow):
         self._play_timer.setInterval(16)  # ~60fps
         self._play_timer.timeout.connect(self._on_play_tick)
 
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(60000)  # 60s
+        self._autosave_timer.timeout.connect(self._on_autosave_tick)
+        self._autosave_timer.start()
+
         self._playback_speed = 1.0
 
         self._setup_menu()
         self._setup_ui()
         self._setup_statusbar()
+
+        QTimer.singleShot(100, self._check_autosave_recovery)
 
     # ------------------------------------------------------------------
     # UI Setup
@@ -214,6 +221,13 @@ class MainWindow(QMainWindow):
         self._speed_combo.currentTextChanged.connect(self._on_speed_changed)
         self._speed_combo.setFixedWidth(70)
         controls_layout.addWidget(self._speed_combo)
+
+        controls_layout.addSpacing(20)
+
+        self._snap_cb = QCheckBox("Snap to Frame")
+        self._snap_cb.setChecked(False)
+        self._snap_cb.toggled.connect(self._on_snap_toggled)
+        controls_layout.addWidget(self._snap_cb)
 
         controls_layout.addStretch()
         main_layout.addLayout(controls_layout)
@@ -617,18 +631,37 @@ class MainWindow(QMainWindow):
         if not path:
             return
             
+        progress = QProgressDialog("Exporting Timeline Data...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Export Progress")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        def update_progress(val: int) -> bool:
+            progress.setValue(val)
+            QApplication.processEvents()
+            return progress.wasCanceled()
+
         try:
             if path.lower().endswith('.fbx'):
                 from mocap_studio.core.exporter import export_timeline_to_fbx
-                export_timeline_to_fbx(self._session, path)
+                export_timeline_to_fbx(self._session, path, progress_callback=update_progress)
             else:
                 from mocap_studio.core.exporter import export_timeline_to_bvh
-                export_timeline_to_bvh(self._session, path)
+                export_timeline_to_bvh(self._session, path, progress_callback=update_progress)
                 
-            QMessageBox.information(self, "Export Timeline", f"Successfully exported timeline to:\n{path}")
+            if progress.wasCanceled():
+                log.info("Timeline Export was canceled by user.")
+                # We do not delete partial files here, but log it
+            else:
+                progress.setValue(100)
+                QMessageBox.information(self, "Export Timeline", f"Successfully exported timeline to:\n{path}")
+                
         except Exception as e:
             log.error(f"Failed to export timeline: {e}", exc_info=True)
             QMessageBox.critical(self, "Export Error", str(e))
+        finally:
+            progress.close()
 
     def _on_cut_requested(self):
         gframe = self._session.current_frame
@@ -771,6 +804,61 @@ class MainWindow(QMainWindow):
         self._set_frame(self._session.current_frame)
         self._update_status()
         self._status_label.setText(f"Session loaded: {os.path.basename(path)}")
+
+    # ------------------------------------------------------------------
+    # Auto-Save & Settings
+    # ------------------------------------------------------------------
+    def _on_snap_toggled(self, checked: bool):
+        self._timeline.snap_to_frame = checked
+
+    def _get_autosave_path(self) -> str:
+        return os.path.expanduser("~/.mocap_studio_autosave.json")
+
+    def _on_autosave_tick(self):
+        if len(self._session.loaded_tracks) == 0:
+            return
+        path = self._get_autosave_path()
+        try:
+            self._session.save_session(path)
+            log.debug(f"Auto-saved session to {path}")
+        except Exception as e:
+            log.error(f"Auto-save failed: {e}")
+
+    def _check_autosave_recovery(self):
+        path = self._get_autosave_path()
+        if os.path.exists(path):
+            reply = QMessageBox.question(
+                self, "Recover Session",
+                "An auto-saved session was found. Would you like to recover it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    self._session.load_session(path, loader_fn=_load_file)
+                    # Update all UI
+                    for slot in range(5):
+                        track = self._session.tracks[slot]
+                        if track is not None:
+                            self._update_track_ui(slot)
+                        else:
+                            self._track_panel.track_controls[slot].set_unloaded()
+                    self._update_viewer()
+                    self._update_timeline()
+                    self._update_frame_range()
+                    self._set_frame(self._session.current_frame)
+                    self._update_status()
+                    self._status_label.setText("Recovered auto-saved session.")
+                    log.info("Auto-saved session recovered.")
+                except Exception as e:
+                    log.error(f"Failed to recover auto-save: {e}", exc_info=True)
+                    QMessageBox.warning(self, "Recovery Failed", f"Could not recover session:\n{e}")
+            else:
+                try:
+                    os.remove(path)
+                    log.info("Auto-saved session discarded by user.")
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # Keyboard shortcuts handled in top-level keyPressEvent above

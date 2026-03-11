@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R, Slerp
 
 log = logging.getLogger(__name__)
 
-def export_timeline_to_bvh(session, filepath):
+def export_timeline_to_bvh(session, filepath, progress_callback=None):
     """
     Exports the visible timeline tracks into a single BVH file with multiple ROOT nodes.
     Applies trim, sub-frame offset (interpolation), scale, and 3D translation/rotation.
@@ -54,6 +54,11 @@ def export_timeline_to_bvh(session, filepath):
                     line_parts.append(_compute_bvh_frame_channels(track, interpolated_pos[t_idx][frame], interpolated_quat[t_idx][frame]))
             
             f.write(" ".join(line_parts) + "\n")
+            
+            if progress_callback and frame % 10 == 0:
+                percent = int(((frame + 1) / export_frames) * 100)
+                if progress_callback(percent):
+                    break
 
     log.info("BVH Export complete.")
 
@@ -187,7 +192,7 @@ def _compute_bvh_frame_channels(track, pos, quats):
     return " ".join(channels)
 
 
-def export_timeline_to_fbx(session, filepath):
+def export_timeline_to_fbx(session, filepath, progress_callback=None):
     """
     Exports the visible timeline tracks into an FBX file with multiple root nodes.
     Applies trim, sub-frame offset (interpolation), scale, and 3D translation/rotation.
@@ -289,6 +294,10 @@ def export_timeline_to_fbx(session, filepath):
                 offset_val = track.positions[0, i] - track.positions[0, parents[i]]
                 
             for f in range(-1, global_frames):
+                if f % 250 == 0:
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.processEvents()
+                    
                 fbx_time.SetFrame(f + 1, fbx.FbxTime.EMode.eFrames60)
 
                 if f == -1:
@@ -359,6 +368,11 @@ def export_timeline_to_fbx(session, filepath):
             curve_r_x.KeyModifyEnd()
             curve_r_y.KeyModifyEnd()
             curve_r_z.KeyModifyEnd()
+
+            if progress_callback:
+                percent = int(((t_idx + 1) / len(tracks)) * 100)
+                if progress_callback(percent):
+                    break
 
     exporter.Export(scene)
     exporter.Destroy()
