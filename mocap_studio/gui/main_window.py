@@ -160,7 +160,8 @@ class MainWindow(QMainWindow):
         self._track_panel.unload_requested.connect(self._on_unload_track)
         self._track_panel.settings_changed.connect(self._on_track_settings_changed)
         self._track_panel.joints_changed.connect(self._on_joints_changed)
-        self._track_panel.auto_align_requested.connect(self._on_auto_align_requested)
+        self._track_panel.align_frames_requested.connect(self._on_align_frames_requested)
+        self._track_panel.align_skeletons_requested.connect(self._on_align_skeletons_requested)
         self._track_panel.file_dropped.connect(self._on_file_dropped)
         self._track_panel.rest_pose_requested.connect(self._on_rest_pose_requested)
         top_splitter.addWidget(self._track_panel)
@@ -350,8 +351,8 @@ class MainWindow(QMainWindow):
             progress.show()
             QApplication.processEvents()
             
-            from core.fbx_extract import load_fbx
-            from core.bvh_extract import load_bvh
+            from ..core.fbx_extract import load_fbx
+            from ..core.bvh_extract import load_bvh
             
             ext = path.lower().split('.')[-1]
             if ext == 'fbx':
@@ -481,44 +482,99 @@ class MainWindow(QMainWindow):
         log.info(f"Track {slot}: {len(hidden_joints)} joints hidden")
         self._update_viewer()
 
-    def _on_auto_align_requested(self, slot: int):
+    def _on_align_frames_requested(self, slot: int):
         ref_idx = self._session.reference_index
         if slot == ref_idx:
-            QMessageBox.information(self, "Auto-Sync", "Cannot auto-sync the reference track to itself.")
-            log.warning(f"Auto-Sync aborted: Target Track {slot+1} is set as the Reference Track.")
+            QMessageBox.information(self, "Align Frames", "Cannot align the reference track to itself.")
+            log.warning(f"Align Frames aborted: Target Track {slot+1} is set as the Reference Track.")
             return
             
         ref_track = self._session.tracks[ref_idx]
         test_track = self._session.tracks[slot]
         
         if not ref_track or not test_track:
-            QMessageBox.warning(self, "Auto-Sync", "Both reference track and target track must be loaded.")
-            log.warning("Auto-Sync aborted: Missing reference or target track.")
+            QMessageBox.warning(self, "Align Frames", "Both reference track and target track must be loaded.")
+            log.warning("Align Frames aborted: Missing reference or target track.")
             return
             
         try:
-            from core.align import auto_align_tracks
+            from ..core.align import auto_align_tracks
             import numpy as np
             optimal_offset = auto_align_tracks(ref_track, test_track)
             
-            log.info(f"Auto-Sync Complete: Track {slot+1} algorithmic offset calculated as {optimal_offset} frames relative to Track {ref_idx+1}.")
+            # Map temporal offset explicitly against local start times
+            if optimal_offset > 0:
+                true_test_offset = ref_track.offset + optimal_offset * ref_track.scale
+            else:
+                true_test_offset = ref_track.offset + optimal_offset * test_track.scale
+                
+            optimal_offset = true_test_offset
             
-            # --- Phase 6: 3D Spatial Position Overlap ---
+            # Flush global timeline configurations
+            self._on_track_offset_changed(slot, optimal_offset)
+            log.info(f"Align Frames Complete: Track {slot+1} timeline offset pushed to {optimal_offset} frames relative to Track {ref_idx+1}.")
+            
+            QMessageBox.information(self, "Align Frames Complete", f"Successfully synced Track {slot+1} timeline to Reference Track {ref_idx+1}.\n\nApplied Timeline Offset: {optimal_offset} frames.")
+            
+        except Exception as e:
+            log.error(f"Align Frames algorithm failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Align Frames Error", f"The alignment algorithm encountered an error:\n{e}")
+
+    def _on_align_skeletons_requested(self, slot: int):
+        ref_idx = self._session.reference_index
+        if slot == ref_idx:
+            QMessageBox.information(self, "Align Skeletons", "Cannot snap the reference track to itself.")
+            log.warning(f"Align Skeletons aborted: Target Track {slot+1} is set as the Reference Track.")
+            return
+            
+        ref_track = self._session.tracks[ref_idx]
+        test_track = self._session.tracks[slot]
+        
+        if not ref_track or not test_track:
+            QMessageBox.warning(self, "Align Skeletons", "Both reference track and target track must be loaded.")
+            log.warning("Align Skeletons aborted: Missing reference or target track.")
+            return
+            
+        try:
             if ref_track.positions is not None and test_track.positions is not None:
+                from scipy.spatial.transform import Rotation as R
+                import numpy as np
+                
                 ref_joint_idx = ref_track.align_joint_index
                 test_joint_idx = test_track.align_joint_index
                 
-                # Fetch reference start location
-                ref_pos_0 = ref_track.positions[0, ref_joint_idx, :].copy()
+                # Snap right now on the active timeline frame
+                global_frame = self._timeline._current_frame
                 
-                # Map target track's local interpolation time relative to optimal_offset
-                test_frame_float = -optimal_offset / test_track.scale
-                test_frame_int = int(max(0, min(test_frame_float, test_track.frame_count - 1)))
+                # Fetch relative frame interpolator indexes for each track
+                ref_local = (global_frame - ref_track.offset) / ref_track.scale
+                test_local = (global_frame - test_track.offset) / test_track.scale
                 
-                test_pos_0 = test_track.positions[test_frame_int, test_joint_idx, :].copy()
+                ref_f = int(max(0, min(ref_local, ref_track.frame_count - 1)))
+                test_f = int(max(0, min(test_local, test_track.frame_count - 1)))
                 
-                # Calculate required spatial delta overlap
-                delta = ref_pos_0 - test_pos_0
+                # Retrieve normalized aligned coordinates exclusively tied to viewport
+                ref_aligned = ref_track.aligned_positions
+                test_aligned = test_track.aligned_positions
+                
+                ref_pos_local = ref_aligned[ref_f, ref_joint_idx, :].copy()
+                test_pos_local = test_aligned[test_f, test_joint_idx, :].copy()
+                
+                # Math 3D Transforms (Extrinsic XYZ)
+                def apply_transform(pos_local, translate, rotate):
+                    rot = R.from_euler('XYZ', [rotate[0], rotate[1], rotate[2]], degrees=True)
+                    return np.array(translate) + rot.apply(pos_local)
+                    
+                ref_translate = (ref_track.translate_x, ref_track.translate_y, ref_track.translate_z)
+                ref_rotate = (ref_track.rotate_x, ref_track.rotate_y, ref_track.rotate_z)
+                ref_pos_global = apply_transform(ref_pos_local, ref_translate, ref_rotate)
+                
+                test_rotate = (test_track.rotate_x, test_track.rotate_y, test_track.rotate_z)
+                test_rot_only = R.from_euler('XYZ', [test_rotate[0], test_rotate[1], test_rotate[2]], degrees=True)
+                test_pos_rot = test_rot_only.apply(test_pos_local)
+                
+                # Calculate required spatial delta overlap in absolute world space
+                delta = ref_pos_global - test_pos_rot
                 
                 # Expose coordinates physically up the native PySide6 layout layer
                 tc = self._track_panel.track_controls[slot]
@@ -539,14 +595,15 @@ class MainWindow(QMainWindow):
                 tc.pos_y_spin.blockSignals(False)
                 tc.pos_z_spin.blockSignals(False)
             
-            # Flush global timeline configurations
-            self._on_track_offset_changed(slot, optimal_offset)
+            # Flush renderer
+            self._update_viewer()
             
-            QMessageBox.information(self, "Auto-Sync Complete", f"Successfully aligned Track {slot+1} to Reference Track {ref_idx+1}.\n\nApplied Timeline Offset: {optimal_offset} frames.\nApplied 3D Translation offsets (X/Y/Z).")
+            log.info(f"Align Skeletons Complete: Snapped Track {slot+1} hip to Track {ref_idx+1} at frame {global_frame}.")
+            QMessageBox.information(self, "Align Skeletons Complete", f"Successfully snapped Track {slot+1} to Reference Track {ref_idx+1} at timeline frame {global_frame}.\n\nApplied 3D Translation offsets (X/Y/Z).")
             
         except Exception as e:
-            log.error(f"Auto-Sync algorithm failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "Auto-Sync Error", f"The alignment algorithm encountered a fatal error:\n{e}")
+            log.error(f"Align Skeletons math failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Align Skeletons Error", f"The 3D alignment engine encountered an error:\n{e}")
 
     def _on_joint_selected(self, slot: int, joint_index: int, joint_name: str):
         """Handle bone picking from the 3D viewer."""
@@ -692,10 +749,10 @@ class MainWindow(QMainWindow):
 
         try:
             if path.lower().endswith('.fbx'):
-                from mocap_studio.core.exporter import export_timeline_to_fbx
+                from ..core.exporter import export_timeline_to_fbx
                 export_timeline_to_fbx(self._session, path, progress_callback=update_progress)
             else:
-                from mocap_studio.core.exporter import export_timeline_to_bvh
+                from ..core.exporter import export_timeline_to_bvh
                 export_timeline_to_bvh(self._session, path, progress_callback=update_progress)
                 
             if progress.wasCanceled():

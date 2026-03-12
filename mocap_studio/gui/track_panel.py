@@ -213,7 +213,8 @@ class SingleTrackControls(QGroupBox):
     unload_requested = Signal(int)  # slot
     settings_changed = Signal(int)  # slot
     joints_changed = Signal(int, set)  # slot, hidden_joints
-    auto_align_requested = Signal(int) # slot
+    align_frames_requested = Signal(int) # slot
+    align_skeletons_requested = Signal(int) # slot
     file_dropped = Signal(int, str) # slot, path
     rest_pose_requested = Signal(int) # slot
 
@@ -284,17 +285,23 @@ class SingleTrackControls(QGroupBox):
         row3.addWidget(QLabel("Align:"))
         self.align_combo = QComboBox()
         self.align_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
-        self.align_combo.setMinimumWidth(60)
+        self.align_combo.setMinimumWidth(50)
         self.align_combo.currentTextChanged.connect(
             lambda: self.settings_changed.emit(self.slot)
         )
         row3.addWidget(self.align_combo, 1)
 
-        self.auto_btn = QPushButton("Auto-Sync")
-        self.auto_btn.setFixedHeight(22)
-        self.auto_btn.setToolTip("Auto-sync this track's offset against the Reference track")
-        self.auto_btn.clicked.connect(lambda: self.auto_align_requested.emit(self.slot))
-        row3.addWidget(self.auto_btn)
+        self.align_frames_btn = QPushButton("Align Frames")
+        self.align_frames_btn.setFixedHeight(22)
+        self.align_frames_btn.setToolTip("Auto-sync this track's timeline offset against the Reference track")
+        self.align_frames_btn.clicked.connect(lambda: self.align_frames_requested.emit(self.slot))
+        row3.addWidget(self.align_frames_btn)
+        
+        self.align_skeletons_btn = QPushButton("Align Skeletons")
+        self.align_skeletons_btn.setFixedHeight(22)
+        self.align_skeletons_btn.setToolTip("Snap this track's 3D skeleton to the Reference track at the current frame")
+        self.align_skeletons_btn.clicked.connect(lambda: self.align_skeletons_requested.emit(self.slot))
+        row3.addWidget(self.align_skeletons_btn)
 
         self.ref_radio = QRadioButton("Ref")
         self.ref_radio.setToolTip("Set as reference track")
@@ -465,6 +472,8 @@ class SingleTrackControls(QGroupBox):
     # ------------------------------------------------------------------
     def _set_controls_enabled(self, enabled: bool):
         self.align_combo.setEnabled(enabled)
+        self.align_frames_btn.setEnabled(enabled)
+        self.align_skeletons_btn.setEnabled(enabled)
         self.offset_spin.setEnabled(enabled)
         self.trim_in_spin.setEnabled(enabled)
         self.trim_out_spin.setEnabled(enabled)
@@ -574,6 +583,8 @@ class SingleTrackControls(QGroupBox):
         self.rot_z_spin.blockSignals(True)
 
         self.align_combo.clear()
+        self.align_frames_btn.setEnabled(False)
+        self.align_skeletons_btn.setEnabled(False)
         self.offset_spin.setValue(0)
         self.scale_spin.setValue(1.0) # Added scale_spin
         self.trim_in_spin.setValue(0)
@@ -641,7 +652,8 @@ class TrackPanel(QScrollArea):
     unload_requested = Signal(int)
     settings_changed = Signal(int)
     joints_changed = Signal(int, set)
-    auto_align_requested = Signal(int)
+    align_frames_requested = Signal(int)
+    align_skeletons_requested = Signal(int)
     file_dropped = Signal(int, str)
     rest_pose_requested = Signal(int)
 
@@ -664,7 +676,8 @@ class TrackPanel(QScrollArea):
             tc.unload_requested.connect(self.unload_requested.emit)
             tc.settings_changed.connect(self.settings_changed.emit)
             tc.joints_changed.connect(self.joints_changed.emit)
-            tc.auto_align_requested.connect(self.auto_align_requested.emit)
+            tc.align_frames_requested.connect(self.align_frames_requested.emit)
+            tc.align_skeletons_requested.connect(self.align_skeletons_requested.emit)
             tc.file_dropped.connect(self.file_dropped.emit)
             tc.rest_pose_requested.connect(self.rest_pose_requested.emit)
             self.track_controls.append(tc)

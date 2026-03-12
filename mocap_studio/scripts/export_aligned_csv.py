@@ -16,16 +16,43 @@ session = globals().get('session', None)
 if session is None:
     raise RuntimeError("This script must be run from within MoCap Studio's Script Editor.")
 
+def get_world_positions(t, num_frames):
+    import numpy as np
+    from scipy.spatial.transform import Rotation as R
+    
+    # Isolate coordinates within dynamic timeline boundaries
+    F = t.aligned_positions.shape[0]
+    local_times = (np.arange(num_frames) - t.offset) / t.scale
+    local_times = np.clip(local_times, 0, F - 1)
+    
+    idx0 = np.floor(local_times).astype(int)
+    idx1 = np.minimum(idx0 + 1, F - 1)
+    frac = (local_times - idx0)[:, np.newaxis, np.newaxis]
+    
+    raw_pos = t.aligned_positions[idx0] * (1.0 - frac) + t.aligned_positions[idx1] * frac
+    
+    # Process explicitly physical Euclidean coordinates natively manipulated inside the 3D Viewer layer
+    rot = R.from_euler('XYZ', [t.rotate_x, t.rotate_y, t.rotate_z], degrees=True)
+    old_shape = raw_pos.shape
+    rotated = rot.apply(raw_pos.reshape(-1, 3))
+    return rotated.reshape(old_shape) + [t.translate_x, t.translate_y, t.translate_z]
+
+
+global_frames = session.max_frame
+if global_frames <= 0:
+    raise RuntimeError("Timeline is completely empty.")
+
 for i, track in enumerate(session.tracks):
-    if track is None:
+    if track is None or not track.visible:
         continue
 
-    aligned = track.aligned_positions
-    if aligned is None:
+    if track.aligned_positions is None:
         print(f"Track {i + 1} ({track.name}): No position data, skipping.")
         continue
 
-    path = os.path.join(out_dir, f"track_{i + 1}_{track.name}_aligned.csv")
+    # Flatten coordinates down using timeline matrix rules
+    track_world = get_world_positions(track, global_frames)
+    path = os.path.join(out_dir, f"track_{i + 1}_{track.name}_global_space.csv")
 
     with open(path, 'w', newline='') as f:
         w = csv.writer(f)
@@ -37,14 +64,14 @@ for i, track in enumerate(session.tracks):
         w.writerow(header)
 
         # Data rows
-        for frame in range(track.frame_count):
+        for frame in range(global_frames):
             if frame % 100 == 0:
                 from PySide6.QtWidgets import QApplication
                 QApplication.processEvents()
                 
             row = [frame]
             for j in range(len(track.skeleton.joint_names)):
-                p = aligned[frame, j]
+                p = track_world[frame, j]
                 row.extend([f"{p[0]:.6f}", f"{p[1]:.6f}", f"{p[2]:.6f}"])
             w.writerow(row)
 

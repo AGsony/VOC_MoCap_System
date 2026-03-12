@@ -153,13 +153,14 @@ class TimelineWidget(QWidget):
             return y, None, None, None
 
         offset = td["offset"]
+        scale = td["scale"]
         fc = td["frame_count"]
         ti = td["trim_in"]
         to = td["trim_out"]
 
         dim_x = self._frame_to_x(offset)
-        bright_x = self._frame_to_x(offset + ti)
-        bright_w = (to - ti) * self._zoom
+        bright_x = self._frame_to_x(offset + (ti * scale))
+        bright_w = ((to - ti) * scale) * self._zoom
 
         return y, dim_x, bright_x, bright_w
 
@@ -436,14 +437,14 @@ class TimelineWidget(QWidget):
                 
             elif self._drag_mode == "trim_in":
                 # dx moves trim_in
-                new_ti = int(round(self._drag_start_val + d_frame))
+                new_ti = int(round(self._drag_start_val + (d_frame / td["scale"])))
                 new_ti = max(0, min(new_ti, td["trim_out"] - 1))
                 td["trim_in"] = new_ti
                 self.track_trim_changed.emit(self._drag_slot, new_ti, td["trim_out"])
                 self.update()
                 
             elif self._drag_mode == "trim_out":
-                new_to = int(round(self._drag_start_val + d_frame))
+                new_to = int(round(self._drag_start_val + (d_frame / td["scale"])))
                 new_to = max(td["trim_in"] + 1, min(new_to, td["frame_count"] - 1))
                 td["trim_out"] = new_to
                 self.track_trim_changed.emit(self._drag_slot, td["trim_in"], new_to)
