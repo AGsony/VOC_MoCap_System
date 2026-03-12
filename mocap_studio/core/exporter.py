@@ -271,6 +271,8 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
                 else:
                     skeleton.SetSkeletonType(fbx.FbxSkeleton.EType.eLimbNode)
                     fbx_nodes[parents[i]].AddChild(node)
+                    
+                skeleton.Size.Set(1.0)
                 node.SetNodeAttribute(skeleton)
                 fbx_nodes.append(node)
 

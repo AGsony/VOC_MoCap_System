@@ -568,12 +568,31 @@ class MainWindow(QMainWindow):
                 ref_translate = (ref_track.translate_x, ref_track.translate_y, ref_track.translate_z)
                 ref_rotate = (ref_track.rotate_x, ref_track.rotate_y, ref_track.rotate_z)
                 ref_pos_global = apply_transform(ref_pos_local, ref_translate, ref_rotate)
+                # -- Forward Orientation Alignment (Yaw/Y-Axis) --
+                rq = ref_track.quaternions[ref_f, ref_joint_idx, :]
+                tq = test_track.quaternions[test_f, test_joint_idx, :]
                 
+                # Quaternions are stored as (w, x, y, z). Scipy expects (x, y, z, w)
+                ref_root_rot = R.from_quat([rq[1], rq[2], rq[3], rq[0]])
+                test_root_rot = R.from_quat([tq[1], tq[2], tq[3], tq[0]])
+                
+                # Extract Euler Yaw (Y-axis) in degrees
+                ref_yaw_raw = ref_root_rot.as_euler('XYZ', degrees=True)[1]
+                test_yaw_raw = test_root_rot.as_euler('XYZ', degrees=True)[1]
+                
+                # The visual global Yaw difference mapping
+                target_rotate_y = ref_yaw_raw + ref_track.rotate_y - test_yaw_raw
+                # Normalize inside [-180, 180] boundary for the spinbox limit
+                target_rotate_y = (target_rotate_y + 180.0) % 360.0 - 180.0
+                
+                test_track.rotate_y = target_rotate_y
+                
+                # Apply the newly rotated Extrinsic transform
                 test_rotate = (test_track.rotate_x, test_track.rotate_y, test_track.rotate_z)
                 test_rot_only = R.from_euler('XYZ', [test_rotate[0], test_rotate[1], test_rotate[2]], degrees=True)
                 test_pos_rot = test_rot_only.apply(test_pos_local)
                 
-                # Calculate required spatial delta overlap in absolute world space
+                # Calculate required spatial positional delta overlap in absolute world space
                 delta = ref_pos_global - test_pos_rot
                 
                 # Expose coordinates physically up the native PySide6 layout layer
@@ -582,10 +601,12 @@ class MainWindow(QMainWindow):
                 tc.pos_x_spin.blockSignals(True)
                 tc.pos_y_spin.blockSignals(True)
                 tc.pos_z_spin.blockSignals(True)
+                tc.rot_y_spin.blockSignals(True)
                 
                 tc.pos_x_spin.setValue(delta[0])
                 tc.pos_y_spin.setValue(delta[1])
                 tc.pos_z_spin.setValue(delta[2])
+                tc.rot_y_spin.setValue(target_rotate_y)
                 
                 test_track.translate_x = delta[0]
                 test_track.translate_y = delta[1]
@@ -594,12 +615,13 @@ class MainWindow(QMainWindow):
                 tc.pos_x_spin.blockSignals(False)
                 tc.pos_y_spin.blockSignals(False)
                 tc.pos_z_spin.blockSignals(False)
+                tc.rot_y_spin.blockSignals(False)
             
             # Flush renderer
             self._update_viewer()
             
             log.info(f"Align Skeletons Complete: Snapped Track {slot+1} hip to Track {ref_idx+1} at frame {global_frame}.")
-            QMessageBox.information(self, "Align Skeletons Complete", f"Successfully snapped Track {slot+1} to Reference Track {ref_idx+1} at timeline frame {global_frame}.\n\nApplied 3D Translation offsets (X/Y/Z).")
+            QMessageBox.information(self, "Align Skeletons Complete", f"Successfully snapped Track {slot+1} to Reference Track {ref_idx+1} at timeline frame {global_frame}.\n\nApplied 3D Translation (X/Y/Z) and Forward Rotation (Y) offsets.")
             
         except Exception as e:
             log.error(f"Align Skeletons math failed: {e}", exc_info=True)
