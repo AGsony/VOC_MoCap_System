@@ -199,6 +199,29 @@ class MainWindow(QMainWindow):
         self._export_btn.setToolTip("Export the entire aligned timeline to BVH/FBX")
         self._export_btn.clicked.connect(self._on_export_requested)
         controls_layout.addWidget(self._export_btn)
+        
+        self._export_mesh_cb = QCheckBox(" Include Mesh")
+        self._export_mesh_cb.setChecked(False)
+        self._export_mesh_cb.setToolTip("Export a proxy skinned mesh (Option B) to force DCC software to visually rig an Armature.\nIf unchecked, exports clean skeleton metadata (Option A).")
+        controls_layout.addWidget(self._export_mesh_cb)
+
+        controls_layout.addSpacing(10)
+
+        controls_layout.addWidget(QLabel("Up-Axis:"))
+        self._export_axis_combo = QComboBox()
+        self._export_axis_combo.addItems(["Z-Up (Blender, Unreal)", "Y-Up (Maya, Unity)"])
+        self._export_axis_combo.setCurrentIndex(0)  # Default Z-Up
+        self._export_axis_combo.setToolTip("Match this to your target 3D application's workspace orientation to prevent skeletons from importing upside down.")
+        controls_layout.addWidget(self._export_axis_combo)
+
+        controls_layout.addSpacing(10)
+
+        controls_layout.addWidget(QLabel("FBX Up-Axis:"))
+        self._export_axis_combo = QComboBox()
+        self._export_axis_combo.addItems(["Z-Up (Blender, Unreal)", "Y-Up (Maya, Unity)"])
+        self._export_axis_combo.setCurrentIndex(0)  # Default Z-Up
+        self._export_axis_combo.setToolTip("Match this to your target 3D application's workspace orientation to prevent skeletons from importing upside down.")
+        controls_layout.addWidget(self._export_axis_combo)
 
         controls_layout.addSpacing(20)
 
@@ -772,7 +795,9 @@ class MainWindow(QMainWindow):
         try:
             if path.lower().endswith('.fbx'):
                 from ..core.exporter import export_timeline_to_fbx
-                export_timeline_to_fbx(self._session, path, progress_callback=update_progress)
+                up_axis_choice = self._export_axis_combo.currentText()
+                force_z_up = "Z-Up" in up_axis_choice
+                export_timeline_to_fbx(self._session, path, progress_callback=update_progress, include_mesh=self._export_mesh_cb.isChecked(), force_z_up=force_z_up)
             else:
                 from ..core.exporter import export_timeline_to_bvh
                 export_timeline_to_bvh(self._session, path, progress_callback=update_progress)

@@ -199,10 +199,13 @@ def _compute_bvh_frame_channels(track, pos, quats):
     return " ".join(channels)
 
 
-def export_timeline_to_fbx(session, filepath, progress_callback=None):
+def export_timeline_to_fbx(session, filepath, progress_callback=None, include_mesh=False, force_z_up=True):
     """
     Exports the visible timeline tracks into an FBX file with multiple root nodes.
     Applies trim, sub-frame offset (interpolation), scale, and 3D translation/rotation.
+    If include_mesh=True, attaches an invisible 3-vertex Proxy Mesh (Option B) skinned 
+    to force strict DCC Armature visualization natively.
+    If force_z_up=True, converts the entire scene natively into Z-Up for Blender/Unreal Engine.
     """
     try:
         import fbx
@@ -262,9 +265,13 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
 
             fbx_nodes = []
             for i in range(J):
-                name = f"{track.skeleton.joint_names[i]}_T{t_idx}"
-                node = fbx.FbxNode.Create(scene, name)
-                skeleton = fbx.FbxSkeleton.Create(scene, "skeleton")
+                joint_name = track.skeleton.joint_names[i]
+                name_prefix = f"{joint_name}_T{t_idx}"
+                node = fbx.FbxNode.Create(scene, name_prefix)
+                
+                # Option A: Name the geometry attribute identically to enforce strict Armature validation
+                skeleton = fbx.FbxSkeleton.Create(scene, joint_name)
+                
                 if parents[i] < 0:
                     skeleton.SetSkeletonType(fbx.FbxSkeleton.EType.eRoot)
                     scene.GetRootNode().AddChild(node)
@@ -370,14 +377,62 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
                     ky = curve_r_y.KeyAdd(fbx_time)[0]
                     curve_r_y.KeySet(ky, fbx_time, float(e_y))
                     kz = curve_r_z.KeyAdd(fbx_time)[0]
-                    curve_r_z.KeySet(kz, fbx_time, float(e_z))
-
-                curve_t_x.KeyModifyEnd()
-                curve_t_y.KeyModifyEnd()
-                curve_t_z.KeyModifyEnd()
                 curve_r_x.KeyModifyEnd()
                 curve_r_y.KeyModifyEnd()
                 curve_r_z.KeyModifyEnd()
+
+            # --- Phase 15: Option A & Option B Binding ---
+            
+            # Step 1: Force an FbxPose (BindPose) locking the initial Frame -1 (or Frame 0) matrices to guarantee the DCC maps the rig
+            bind_pose = fbx.FbxPose.Create(scene, f"BindPose_T{t_idx}")
+            bind_pose.SetIsBindPose(True)
+            for n in fbx_nodes:
+                bind_pose.Add(n, fbx.FbxMatrix(n.EvaluateGlobalTransform(fbx.FbxTime(0))))
+            scene.AddPose(bind_pose)
+
+            # Step 2: Option B - Skinned Proxy Mesh Injection
+            if include_mesh and len(fbx_nodes) > 0:
+                mesh_name = f"ProxyMesh_T{t_idx}"
+                mesh = fbx.FbxMesh.Create(scene, mesh_name)
+                
+                # 3-Vertex microscopic invisible triangle
+                mesh.InitControlPoints(3)
+                mesh.SetControlPointAt(fbx.FbxVector4(0, 0, 0, 0), 0)
+                mesh.SetControlPointAt(fbx.FbxVector4(0.001, 0, 0, 0), 1)
+                mesh.SetControlPointAt(fbx.FbxVector4(0, 0.001, 0, 0), 2)
+                
+                mesh.BeginPolygon()
+                mesh.AddPolygon(0)
+                mesh.AddPolygon(1)
+                mesh.AddPolygon(2)
+                mesh.EndPolygon()
+                
+                mesh_node = fbx.FbxNode.Create(scene, f"{mesh_name}_Node")
+                mesh_node.SetNodeAttribute(mesh)
+                scene.GetRootNode().AddChild(mesh_node)
+                
+                skin = fbx.FbxSkin.Create(scene, f"Skin_T{t_idx}")
+                
+                # Force attachment onto the Root Extrinsic node explicitly
+                root_node = fbx_nodes[0]
+                cluster = fbx.FbxCluster.Create(scene, f"Cluster_T{t_idx}")
+                cluster.SetLink(root_node)
+                cluster.SetLinkMode(fbx.FbxCluster.eTotalOne)
+                
+                # Weight vertices
+                cluster.AddControlPointIndex(0, 1.0)
+                cluster.AddControlPointIndex(1, 1.0)
+                cluster.AddControlPointIndex(2, 1.0)
+                
+                # Store T=0 Transforms
+                cluster.SetTransformMatrix(mesh_node.EvaluateGlobalTransform(fbx.FbxTime(0)))
+                cluster.SetTransformLinkMatrix(root_node.EvaluateGlobalTransform(fbx.FbxTime(0)))
+                
+                skin.AddCluster(cluster)
+                mesh.AddDeformer(skin)
+                
+                # Re-append mesh to bind pose
+                bind_pose.Add(mesh_node, fbx.FbxMatrix(mesh_node.EvaluateGlobalTransform(fbx.FbxTime(0))))
 
                 if progress_callback:
                     percent = int(((t_idx + 1) / len(tracks)) * 100)
@@ -388,6 +443,14 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None):
                             pass
                         log.warning("FBX Export cancelled by user. Partial file deleted.")
                         return False
+
+            # --- Phase 16 & 17: User-Selectable Explicit Z-Up Axis System Binding ---
+            # MoCap Studio natively processes and renders tracking inside a Y-Up Cartesian space.
+            # If the user selected Z-Up (for Blender/Unreal), we convert the scene rigorously inline.
+            # If they selected Y-Up (Maya/Unity), we simply leave the scene alone.
+            if force_z_up:
+                axis_system = fbx.FbxAxisSystem.MayaZUp
+                axis_system.ConvertScene(scene)
 
         exporter.Export(scene)
         log.info("FBX Export complete.")
