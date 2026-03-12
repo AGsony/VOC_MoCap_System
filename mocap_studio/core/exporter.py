@@ -5,112 +5,443 @@ from scipy.spatial.transform import Rotation as R
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+# =============================================================================
+# COORDINATE SYSTEM NOTES — READ BEFORE TOUCHING THIS FILE
+# =============================================================================
+#
+# Internal convention (matches fbx_extract.py, bvh_extract.py, and viewer):
+#   Quaternions stored as  (w, x, y, z)  — NOT scipy's default (x,y,z,w).
+#   World space is Y-up, right-handed.
+#
+# FBX export targets:
+#   force_z_up=False  →  Y-up  (Maya / Unity)      — curves written as-is
+#   force_z_up=True   →  Z-up  (Blender / Unreal)  — root position and root
+#                          orientation physically baked into Z-up space.
+#
+# WHY we bake instead of FbxAxisSystem.ConvertScene() or SetAxisSystem():
+#   ConvertScene() rewrites baked curves and has documented bugs with
+#   pre-rotations in the Python SDK.
+#   SetAxisSystem() / SetInScene() write a metadata tag only — Blender
+#   ignores that tag on import and always reads curve values as Z-up.
+#   The conversion MUST be baked into the curve data itself.
+#
+# Z-up conversion (root joint ONLY):
+#   Position:    (x,  y,  z)_yup  →  (x,  z, -y)_zup
+#   Orientation: R_zup = Rx(+90°) * R_yup
+#
+# Non-root bone LOCAL rotations and bone-offset translations are NEVER
+# modified — they live in joint-local space and are correct regardless
+# of world up-axis.
+#
+# =============================================================================
 
-def _quat_wxyz_to_xyzw(q):
+
+# =============================================================================
+# SHARED HELPERS
+# =============================================================================
+
+def _wxyz_to_xyzw(q):
     """
-    Convert quaternion array from (w,x,y,z) storage convention to scipy's (x,y,z,w).
-    Works on any shape (..., 4).
+    Reorder quaternion(s) from internal storage (w,x,y,z) to scipy (x,y,z,w).
+    Accepts any shape (..., 4).  Returns same shape, new array.
     """
     return np.concatenate([q[..., 1:], q[..., :1]], axis=-1)
 
 
 def _interpolate_track(track, global_frames):
     """
-    Return (pos, quats) arrays interpolated to global_frames length,
-    applying track.offset and track.scale.
+    Interpolate track data to exactly `global_frames` frames, honouring
+    track.offset and track.scale.
 
-    BUG FIX: track.scale=0 previously caused ZeroDivisionError.
-    BUG FIX: track.positions being None no longer raises AttributeError.
+    Returns
+    -------
+    pos   : (global_frames, J, 3)  world positions
+    quats : (global_frames, J, 4)  world quats (w,x,y,z), or None
     """
     if track.positions is None:
         raise ValueError(f"Track '{track.name}' has no position data.")
 
     F, J, _ = track.positions.shape
-    scale = track.scale if track.scale != 0.0 else 1.0   # guard divide-by-zero
-    local_times = (np.arange(global_frames) - track.offset) / scale
-    local_times = np.clip(local_times, 0, F - 1)
+    scale   = track.scale if track.scale != 0.0 else 1.0
+    t       = np.clip((np.arange(global_frames) - track.offset) / scale, 0, F - 1)
 
-    idx0 = np.floor(local_times).astype(int)
-    idx1 = np.minimum(idx0 + 1, F - 1)
-    frac = (local_times - idx0)[:, np.newaxis, np.newaxis]
+    i0   = np.floor(t).astype(int)
+    i1   = np.minimum(i0 + 1, F - 1)
+    frac = (t - i0)[:, np.newaxis, np.newaxis]
 
-    # Position lerp
-    pos = track.positions[idx0] * (1.0 - frac) + track.positions[idx1] * frac
+    pos = track.positions[i0] * (1.0 - frac) + track.positions[i1] * frac
 
     if track.quaternions is None:
         return pos, None
 
-    q0 = track.quaternions[idx0]   # (global_frames, J, 4)  stored w,x,y,z
-    q1 = track.quaternions[idx1]
-
-    # Ensure shortest-path interpolation
+    q0  = track.quaternions[i0]
+    q1  = track.quaternions[i1]
     dot = np.sum(q0 * q1, axis=2, keepdims=True)
-    q1 = np.where(dot < 0, -q1, q1)
+    q1  = np.where(dot < 0, -q1, q1)
+    q   = q0 * (1.0 - frac) + q1 * frac
+    q  /= np.maximum(np.linalg.norm(q, axis=2, keepdims=True), 1e-8)
 
-    # Normalized linear interpolation (nlerp) — fast and stable enough for 60 fps
-    q_interp = q0 * (1.0 - frac) + q1 * frac
-    q_norm = np.linalg.norm(q_interp, axis=2, keepdims=True)
-    q_interp = q_interp / np.maximum(q_norm, 1e-8)
-
-    return pos, q_interp
+    return pos, q
 
 
 def _world_quats_to_local_euler(quats_wxyz, parent_indices, euler_order='xyz'):
     """
-    Convert per-joint world quaternions (w,x,y,z) to local Euler angles (degrees).
+    Convert (F, J, 4) world quaternions (w,x,y,z) to (F, J, 3) local Euler
+    angles in degrees using the skeleton hierarchy.
 
-    BUG FIX: was passing (w,x,y,z) directly to scipy which expects (x,y,z,w),
-    silently corrupting every rotation.
-
-    Returns ndarray shape (..., J, 3).
+    Local rotation j = inv(world_rot[parent[j]]) * world_rot[j]
+    Root joints (parent < 0) use their world rotation directly.
     """
-    leading = quats_wxyz.shape[:-2]   # e.g. (F,) or ()
-    J = quats_wxyz.shape[-2]
+    F, J, _ = quats_wxyz.shape
+    xyzw       = _wxyz_to_xyzw(quats_wxyz.reshape(-1, 4))
+    world_mats = R.from_quat(xyzw).as_matrix().reshape(F, J, 3, 3)
 
-    flat = quats_wxyz.reshape(-1, J, 4)
-    N = flat.shape[0]
-
-    xyzw = _quat_wxyz_to_xyzw(flat.reshape(-1, 4))
-    world_mats = R.from_quat(xyzw).as_matrix().reshape(N, J, 3, 3)
-
-    local_mats = np.zeros_like(world_mats)
-    for i in range(J):
-        p = parent_indices[i]
+    local_mats = np.empty_like(world_mats)
+    for j in range(J):
+        p = parent_indices[j]
         if p < 0:
-            local_mats[:, i] = world_mats[:, i]
+            local_mats[:, j] = world_mats[:, j]
         else:
-            parent_inv = np.transpose(world_mats[:, p], axes=(0, 2, 1))
-            local_mats[:, i] = parent_inv @ world_mats[:, i]
+            local_mats[:, j] = (
+                np.transpose(world_mats[:, p], (0, 2, 1)) @ world_mats[:, j]
+            )
 
-    euler = R.from_matrix(local_mats.reshape(-1, 3, 3)) \
-              .as_euler(euler_order, degrees=True) \
-              .reshape(N, J, 3)
+    return (
+        R.from_matrix(local_mats.reshape(-1, 3, 3))
+         .as_euler(euler_order, degrees=True)
+         .reshape(F, J, 3)
+    )
 
-    return euler.reshape(*leading, J, 3)
+
+# =============================================================================
+# FBX EXPORT  —  PRIMARY / LOCKED DOWN
+# =============================================================================
+
+def export_timeline_to_fbx(session, filepath,
+                            progress_callback=None,
+                            include_mesh=False,
+                            force_z_up=True):
+    """
+    Export all visible tracks to a single FBX file.
+
+    Parameters
+    ----------
+    session           Session  — must expose .tracks (list) and .max_frame (int)
+    filepath          str      — absolute output path including .fbx extension
+    progress_callback callable — optional fn(percent:int) → bool; return True to cancel
+    include_mesh      bool     — attach invisible proxy mesh so DCCs show the armature
+    force_z_up        bool     — True: Z-up (Blender/Unreal), False: Y-up (Maya/Unity)
+
+    Returns True on success, False if cancelled by progress_callback.
+    Raises RuntimeError / ImportError / ValueError on hard failure.
+    """
+
+    # ------------------------------------------------------------------ guards
+    try:
+        import fbx
+    except ImportError:
+        raise ImportError(
+            "Autodesk FBX Python SDK is not installed.\n"
+            "Install fbxPIP or the official SDK wheel for Python 3.10."
+        )
+
+    tracks = [t for t in session.tracks if t is not None and t.visible]
+    if not tracks:
+        raise ValueError("No visible tracks to export.")
+
+    global_frames = int(session.max_frame)
+    if global_frames <= 0:
+        raise ValueError("Timeline is empty (max_frame == 0).")
+
+    log.info(
+        f"FBX export started | tracks={len(tracks)} | "
+        f"frames={global_frames} | z_up={force_z_up} | path={filepath}"
+    )
+
+    # ------------------------------------------------- Z-up conversion helpers
+    # Defined once per export call; only applied to root joint when force_z_up.
+    zup_basis = R.from_euler('x', 90.0, degrees=True) if force_z_up else None
+
+    def _pos_to_zup(p):
+        """(x, y, z)_yup → (x, z, -y)_zup.  New array, input not mutated."""
+        out = p.copy()
+        out[..., 1] =  p[..., 2]
+        out[..., 2] = -p[..., 1]
+        return out
+
+    # -------------------------------------------- FBX SDK manager / exporter
+    manager = fbx.FbxManager.Create()
+    fbx.FbxIOSettings.Create(manager, fbx.IOSROOT)
+
+    exporter_obj = fbx.FbxExporter.Create(manager, "")
+    if not exporter_obj.Initialize(filepath, -1, manager.GetIOSettings()):
+        err = exporter_obj.GetStatus().GetErrorString()
+        exporter_obj.Destroy()
+        manager.Destroy()
+        raise RuntimeError(f"FBX exporter failed to initialise: {err}")
+
+    scene = fbx.FbxScene.Create(manager, "MoCapScene")
+
+    try:
+        # --------------------------------------- scene-level global settings
+        gs = scene.GetGlobalSettings()
+        gs.SetTimeMode(fbx.FbxTime.EMode.eFrames60)
+
+        # Timeline span — DCCs open with the correct playback range
+        t_start = fbx.FbxTime(); t_start.SetFrame(0,            fbx.FbxTime.EMode.eFrames60)
+        t_end   = fbx.FbxTime(); t_end.SetFrame(global_frames,  fbx.FbxTime.EMode.eFrames60)
+        span    = fbx.FbxTimeSpan(); span.Set(t_start, t_end)
+        gs.SetTimelineDefaultTimeSpan(span)
+
+        # Axis metadata tag (Maya reads this; Blender ignores it — hence the bake)
+        axis_system = fbx.FbxAxisSystem(
+            fbx.FbxAxisSystem.EUpVector.eZAxis  if force_z_up
+                else fbx.FbxAxisSystem.EUpVector.eYAxis,
+            fbx.FbxAxisSystem.EFrontVector.eParityOdd,
+            fbx.FbxAxisSystem.ECoordSystem.eRightHanded,
+        )
+        gs.SetAxisSystem(axis_system)
+
+        # ----------------------------------------- animation stack / layer
+        anim_stack = fbx.FbxAnimStack.Create(scene, "Take001")
+        anim_layer = fbx.FbxAnimLayer.Create(scene, "BaseLayer")
+        anim_stack.AddMember(anim_layer)
+        anim_stack.SetLocalTimeSpan(span)
+
+        fbx_time = fbx.FbxTime()
+
+        # ================================================================
+        # TRACK LOOP
+        # ================================================================
+        for t_idx, track in enumerate(tracks):
+
+            # ---------------------------------- interpolate to timeline length
+            pos, quats = _interpolate_track(track, global_frames)
+            # pos   : (global_frames, J, 3)
+            # quats : (global_frames, J, 4)  stored (w,x,y,z)
+
+            parents = track.skeleton.parent_indices
+            J       = len(parents)
+
+            if quats is None:
+                raise ValueError(
+                    f"Track '{track.name}' has no rotation data — FBX export requires rotations."
+                )
+
+            # -------------------- precompute all local Euler angles (F, J, 3)
+            # These are joint-LOCAL rotations. They are NEVER modified by the
+            # Z-up conversion — that only affects the root position/orientation.
+            local_euler = _world_quats_to_local_euler(quats, parents, euler_order='xyz')
+
+            # -------------------- rest-pose (bind-pose) data
+            rp_pos = (track.rest_pose_positions
+                      if track.rest_pose_positions is not None
+                      else track.positions[0])              # (J, 3)
+
+            rq_raw = (track.rest_pose_quaternions
+                      if track.rest_pose_quaternions is not None
+                      else (track.quaternions[0]
+                            if track.quaternions is not None else None))  # (J,4) or None
+
+            if rq_raw is not None:
+                rest_euler = _world_quats_to_local_euler(
+                    rq_raw[np.newaxis], parents, euler_order='xyz'
+                )[0]    # (J, 3)
+            else:
+                rest_euler = np.zeros((J, 3))
+
+            # -------------------- root alignment constants
+            track_rot = R.from_euler(
+                'xyz', [track.rotate_x, track.rotate_y, track.rotate_z],
+                degrees=True
+            )
+            aji    = track.align_joint_index
+            f0_pos = track.positions[0, aji, :].copy()
+            f0_pos[1] = 0.0     # strip XZ floor drift, preserve height
+
+            # ================================================================
+            # JOINT LOOP
+            # ================================================================
+            fbx_nodes = [None] * J
+
+            for j in range(J):
+                jname   = track.skeleton.joint_names[j]
+                is_root = parents[j] < 0
+
+                # Root named after track; children use joint_trackname
+                node_name = track.name if is_root else f"{jname}_{track.name}"
+
+                node      = fbx.FbxNode.Create(scene, node_name)
+                skel_attr = fbx.FbxSkeleton.Create(scene, node_name)
+                skel_attr.SetSkeletonType(
+                    fbx.FbxSkeleton.EType.eRoot     if is_root
+                    else fbx.FbxSkeleton.EType.eLimbNode
+                )
+                skel_attr.Size.Set(1.0)
+                node.SetNodeAttribute(skel_attr)
+
+                if is_root:
+                    scene.GetRootNode().AddChild(node)
+                else:
+                    fbx_nodes[parents[j]].AddChild(node)
+                fbx_nodes[j] = node
+
+                # ---------------------------------- get animation curves
+                curve_tx = node.LclTranslation.GetCurve(anim_layer, "X", True)
+                curve_ty = node.LclTranslation.GetCurve(anim_layer, "Y", True)
+                curve_tz = node.LclTranslation.GetCurve(anim_layer, "Z", True)
+                curve_rx = node.LclRotation.GetCurve(anim_layer, "X", True)
+                curve_ry = node.LclRotation.GetCurve(anim_layer, "Y", True)
+                curve_rz = node.LclRotation.GetCurve(anim_layer, "Z", True)
+
+                curve_tx.KeyModifyBegin(); curve_ty.KeyModifyBegin(); curve_tz.KeyModifyBegin()
+                curve_rx.KeyModifyBegin(); curve_ry.KeyModifyBegin(); curve_rz.KeyModifyBegin()
+
+                # Constant bone offset for non-root joints
+                if not is_root:
+                    bone_offset = track.positions[0, j] - track.positions[0, parents[j]]
+
+                # ============================================================
+                # FRAME LOOP
+                # f == -1  →  rest / bind pose  (FBX time frame 0)
+                # f == 0..global_frames-1  →  animation  (FBX time frame 1..N)
+                # ============================================================
+                for f in range(-1, global_frames):
+
+                    if (f + 1) % 250 == 0:
+                        from PySide6.QtWidgets import QApplication
+                        QApplication.processEvents()
+
+                    fbx_time.SetFrame(f + 1, fbx.FbxTime.EMode.eFrames60)
+
+                    # Choose source data for this frame
+                    if f == -1:
+                        raw_pos_j = rp_pos[j].copy()
+                        euler_j   = rest_euler[j]
+                    else:
+                        raw_pos_j = pos[f, j].copy()
+                        euler_j   = local_euler[f, j]
+
+                    # ------------------------------------------------ ROOT
+                    if is_root:
+                        # Step 1 — remove XZ floor-origin drift
+                        rp = raw_pos_j - f0_pos
+
+                        # Step 2 — apply UI rotation (rotate_x/y/z)
+                        rp = track_rot.apply(rp)
+
+                        # Step 3 — apply UI translation (translate_x/y/z)
+                        rp[0] += track.translate_x
+                        rp[1] += track.translate_y
+                        rp[2] += track.translate_z
+
+                        # Step 4 — Z-up: remap root POSITION
+                        #   (x, y, z)_yup → (x, z, -y)_zup
+                        if force_z_up:
+                            rp = _pos_to_zup(rp)
+
+                        k = curve_tx.KeyAdd(fbx_time)[0]; curve_tx.KeySet(k, fbx_time, float(rp[0]))
+                        k = curve_ty.KeyAdd(fbx_time)[0]; curve_ty.KeySet(k, fbx_time, float(rp[1]))
+                        k = curve_tz.KeyAdd(fbx_time)[0]; curve_tz.KeySet(k, fbx_time, float(rp[2]))
+
+                        # Step 5 — build root orientation (UI rotation × local)
+                        root_r = track_rot * R.from_euler('xyz', euler_j, degrees=True)
+
+                        # Step 6 — Z-up: re-orient root by Rx(+90°)
+                        #   Non-root joint rotations are NEVER touched here.
+                        if force_z_up:
+                            root_r = zup_basis * root_r
+
+                        ex, ey, ez = root_r.as_euler('xyz', degrees=True)
+
+                    # ------------------------------------------ NON-ROOT
+                    else:
+                        # Constant bone offset — same every frame
+                        k = curve_tx.KeyAdd(fbx_time)[0]; curve_tx.KeySet(k, fbx_time, float(bone_offset[0]))
+                        k = curve_ty.KeyAdd(fbx_time)[0]; curve_ty.KeySet(k, fbx_time, float(bone_offset[1]))
+                        k = curve_tz.KeyAdd(fbx_time)[0]; curve_tz.KeySet(k, fbx_time, float(bone_offset[2]))
+
+                        # Local rotation — untouched, no coordinate conversion
+                        ex, ey, ez = euler_j
+
+                    # ----------------------------------------- write rotation (all joints)
+                    k = curve_rx.KeyAdd(fbx_time)[0]; curve_rx.KeySet(k, fbx_time, float(ex))
+                    k = curve_ry.KeyAdd(fbx_time)[0]; curve_ry.KeySet(k, fbx_time, float(ey))
+                    k = curve_rz.KeyAdd(fbx_time)[0]; curve_rz.KeySet(k, fbx_time, float(ez))
+
+                # ------------------------------------------------ end frame loop
+                curve_tx.KeyModifyEnd(); curve_ty.KeyModifyEnd(); curve_tz.KeyModifyEnd()
+                curve_rx.KeyModifyEnd(); curve_ry.KeyModifyEnd(); curve_rz.KeyModifyEnd()
+
+            # ================================================================ end joint loop
+
+            # ---------------------------------------------------- bind pose
+            t0 = fbx.FbxTime(); t0.SetFrame(0, fbx.FbxTime.EMode.eFrames60)
+            bind_pose = fbx.FbxPose.Create(scene, f"BindPose_{track.name}")
+            bind_pose.SetIsBindPose(True)
+            for node in fbx_nodes:
+                bind_pose.Add(node, fbx.FbxMatrix(node.EvaluateGlobalTransform(t0)))
+            scene.AddPose(bind_pose)
+
+            # ----------------------------------------- optional proxy mesh
+            if include_mesh:
+                mname = f"ProxyMesh_{track.name}"
+                mesh  = fbx.FbxMesh.Create(scene, mname)
+                mesh.InitControlPoints(3)
+                mesh.SetControlPointAt(fbx.FbxVector4(0.0,   0.0,   0.0, 0.0), 0)
+                mesh.SetControlPointAt(fbx.FbxVector4(0.001, 0.0,   0.0, 0.0), 1)
+                mesh.SetControlPointAt(fbx.FbxVector4(0.0,   0.001, 0.0, 0.0), 2)
+                mesh.BeginPolygon()
+                mesh.AddPolygon(0); mesh.AddPolygon(1); mesh.AddPolygon(2)
+                mesh.EndPolygon()
+
+                mesh_node = fbx.FbxNode.Create(scene, f"{mname}_Node")
+                mesh_node.SetNodeAttribute(mesh)
+                scene.GetRootNode().AddChild(mesh_node)
+
+                cluster = fbx.FbxCluster.Create(scene, f"Cluster_{track.name}")
+                cluster.SetLink(fbx_nodes[0])
+                cluster.SetLinkMode(fbx.FbxCluster.eTotalOne)
+                cluster.AddControlPointIndex(0, 1.0)
+                cluster.AddControlPointIndex(1, 1.0)
+                cluster.AddControlPointIndex(2, 1.0)
+                cluster.SetTransformMatrix(mesh_node.EvaluateGlobalTransform(t0))
+                cluster.SetTransformLinkMatrix(fbx_nodes[0].EvaluateGlobalTransform(t0))
+
+                skin = fbx.FbxSkin.Create(scene, f"Skin_{track.name}")
+                skin.AddCluster(cluster)
+                mesh.AddDeformer(skin)
+                bind_pose.Add(mesh_node, fbx.FbxMatrix(mesh_node.EvaluateGlobalTransform(t0)))
+
+            # ------------------------------------------------- progress
+            if progress_callback:
+                pct = int(((t_idx + 1) / len(tracks)) * 100)
+                if progress_callback(pct):
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+                    log.warning("FBX export cancelled. Partial file deleted.")
+                    return False
+
+        # ================================================================ end track loop
+
+        exporter_obj.Export(scene)
+        log.info("FBX export complete.")
+        return True
+
+    finally:
+        exporter_obj.Destroy()
+        manager.Destroy()
 
 
-# ---------------------------------------------------------------------------
-# BVH Export
-# ---------------------------------------------------------------------------
+# =============================================================================
+# BVH EXPORT  —  SECONDARY (preserved)
+# =============================================================================
 
 def export_timeline_to_bvh(session, filepath, progress_callback=None):
-    """
-    Export all visible timeline tracks to a single BVH file.
+    """Export all visible tracks to a single BVH file (multiple ROOT blocks)."""
 
-    BUG FIX: 'track' variable leaked from inner loop into Frame Time line —
-    would reference the LAST track's fps instead of a consistent value,
-    and would crash if tracks list was empty (already guarded above but
-    the leak was still a latent bug).
-
-    BUG FIX: file handle was manually closed inside the loop on cancellation
-    while also being managed by the 'with' block — double-close.
-
-    BUG FIX: progress percent calculation used (frame+1)/export_frames but
-    frame starts at -1, so first tick reported negative percent.
-    """
     tracks = [t for t in session.tracks if t is not None and t.visible]
     if not tracks:
         raise ValueError("No visible tracks to export.")
@@ -119,82 +450,74 @@ def export_timeline_to_bvh(session, filepath, progress_callback=None):
     if global_frames <= 0:
         raise ValueError("Timeline is empty.")
 
-    # Use reference track fps for frame time — consistent, not leaked from loop
-    ref_fps = tracks[0].fps
-    export_frames = global_frames + 1   # +1 for rest-pose frame at index 0
+    ref_fps       = tracks[0].fps
+    export_frames = global_frames + 1   # frame -1 = rest pose
 
-    log.info(f"Exporting BVH: {len(tracks)} track(s), {export_frames} frames → {filepath}")
+    log.info(f"BVH export: {len(tracks)} track(s), {export_frames} frames → {filepath}")
 
-    # Pre-interpolate all tracks before opening the file
-    interpolated_pos = []
-    interpolated_quat = []
+    interp_pos, interp_quat = [], []
     for track in tracks:
-        pos, quats = _interpolate_track(track, global_frames)
-        interpolated_pos.append(pos)
-        interpolated_quat.append(quats)
+        p, q = _interpolate_track(track, global_frames)
+        interp_pos.append(p)
+        interp_quat.append(q)
 
     cancelled = False
     try:
         with open(filepath, "w") as f:
             f.write("HIERARCHY\n")
             for t_idx, track in enumerate(tracks):
-                _write_bvh_hierarchy(f, track, t_idx)
+                _bvh_write_hierarchy(f, track, t_idx)
 
             f.write("MOTION\n")
             f.write(f"Frames: {export_frames}\n")
             f.write(f"Frame Time: {1.0 / ref_fps:.6f}\n")
 
             for frame in range(-1, global_frames):
-                line_parts = []
+                parts = []
                 for t_idx, track in enumerate(tracks):
                     if frame == -1:
-                        r_pos  = track.rest_pose_positions  if track.rest_pose_positions  is not None else track.positions[0]
-                        r_quat = track.rest_pose_quaternions if track.rest_pose_quaternions is not None \
-                                 else (track.quaternions[0:1] if track.quaternions is not None else None)
-                        # r_quat shape must be (J,4) for the helper — squeeze if needed
-                        if r_quat is not None and r_quat.ndim == 3:
-                            r_quat = r_quat[0]
-                        line_parts.append(_compute_bvh_frame_channels(track, r_pos, r_quat))
+                        rp = (track.rest_pose_positions
+                              if track.rest_pose_positions is not None
+                              else track.positions[0])
+                        rq = (track.rest_pose_quaternions
+                              if track.rest_pose_quaternions is not None
+                              else (track.quaternions[0] if track.quaternions is not None else None))
+                        if rq is not None and rq.ndim == 3:
+                            rq = rq[0]
+                        parts.append(_bvh_frame_channels(track, rp, rq))
                     else:
-                        line_parts.append(_compute_bvh_frame_channels(
-                            track,
-                            interpolated_pos[t_idx][frame],
-                            interpolated_quat[t_idx][frame] if interpolated_quat[t_idx] is not None else None,
-                        ))
+                        q = interp_quat[t_idx][frame] if interp_quat[t_idx] is not None else None
+                        parts.append(_bvh_frame_channels(track, interp_pos[t_idx][frame], q))
 
-                f.write(" ".join(line_parts) + "\n")
+                f.write(" ".join(parts) + "\n")
 
                 if progress_callback and frame % 10 == 0:
-                    # frame runs -1..global_frames-1; shift so percent is always 0-100
-                    percent = int(((frame + 2) / export_frames) * 100)
-                    percent = max(0, min(100, percent))
-                    if progress_callback(percent):
+                    pct = max(0, min(100, int(((frame + 2) / export_frames) * 100)))
+                    if progress_callback(pct):
                         cancelled = True
                         break
-
     finally:
         if cancelled:
             try:
                 os.remove(filepath)
             except OSError:
                 pass
-            log.warning("BVH export cancelled by user. Partial file deleted.")
+            log.warning("BVH export cancelled. Partial file deleted.")
             return False
 
     log.info("BVH export complete.")
     return True
 
 
-def _write_bvh_hierarchy(f, track, t_idx):
-    """Write HIERARCHY section for one track."""
-    pos0 = track.positions[0]
+def _bvh_write_hierarchy(f, track, t_idx):
+    pos0    = track.positions[0]
+    parents = track.skeleton.parent_indices
 
-    def write_node(j_idx, depth):
-        name    = track.skeleton.joint_names[j_idx]
-        indent  = "  " * depth
-        parents = track.skeleton.parent_indices
-        children = [i for i, p in enumerate(parents) if p == j_idx]
-        is_root  = parents[j_idx] < 0
+    def write_node(j, depth):
+        name     = track.skeleton.joint_names[j]
+        indent   = "  " * depth
+        children = [c for c, p in enumerate(parents) if p == j]
+        is_root  = parents[j] < 0
 
         if is_root:
             f.write(f"{indent}ROOT {name}_T{t_idx}\n")
@@ -204,13 +527,7 @@ def _write_bvh_hierarchy(f, track, t_idx):
             f.write(f"{indent}JOINT {name}_T{t_idx}\n")
 
         f.write(f"{indent}{{\n")
-
-        if is_root:
-            offset = [0.0, 0.0, 0.0]
-        else:
-            parent_idx = parents[j_idx]
-            offset = pos0[j_idx] - pos0[parent_idx]
-
+        offset = [0.0, 0.0, 0.0] if is_root else list(pos0[j] - pos0[parents[j]])
         f.write(f"{indent}  OFFSET {offset[0]:.6f} {offset[1]:.6f} {offset[2]:.6f}\n")
 
         if is_root:
@@ -220,345 +537,47 @@ def _write_bvh_hierarchy(f, track, t_idx):
 
         for child in children:
             write_node(child, depth + 1)
-
         f.write(f"{indent}}}\n")
 
-    roots = [i for i, p in enumerate(track.skeleton.parent_indices) if p < 0]
-    for r in roots:
+    for r in [i for i, p in enumerate(parents) if p < 0]:
         write_node(r, 0)
 
 
-def _compute_bvh_frame_channels(track, pos, quats):
-    """
-    Compute the BVH channel values for one frame of one track.
-
-    BUG FIX: quats passed as (w,x,y,z) directly to R.from_quat which
-    expects (x,y,z,w) — corrupted all rotations silently.
-
-    BUG FIX: root_pos was mutated in-place (root_pos -= frame0_pos then
-    root_pos[0] += ...) while pos[r] is a numpy view — could corrupt the
-    source array. Now uses .copy() explicitly.
-    """
+def _bvh_frame_channels(track, pos, quats):
     if quats is None:
         return ""
 
     parents = track.skeleton.parent_indices
-    J = len(parents)
+    J       = len(parents)
 
-    # BUG FIX: reorder (w,x,y,z) → (x,y,z,w) before passing to scipy
-    quats_xyzw = _quat_wxyz_to_xyzw(quats)           # (J, 4)
-    world_mats = R.from_quat(quats_xyzw).as_matrix()  # (J, 3, 3)
+    xyzw       = _wxyz_to_xyzw(quats)
+    world_mats = R.from_quat(xyzw).as_matrix()
 
     local_mats = np.zeros((J, 3, 3))
     for i in range(J):
         p = parents[i]
-        if p < 0:
-            local_mats[i] = world_mats[i]
-        else:
-            local_mats[i] = world_mats[p].T @ world_mats[i]
+        local_mats[i] = world_mats[i] if p < 0 else world_mats[p].T @ world_mats[i]
 
-    # BVH standard rotation order: ZXY
-    local_euler = R.from_matrix(local_mats).as_euler('zxy', degrees=True)  # (J, 3)
+    local_euler = R.from_matrix(local_mats).as_euler('zxy', degrees=True)
 
-    channels = []
-
+    channels  = []
     track_rot = R.from_euler('xyz', [track.rotate_x, track.rotate_y, track.rotate_z], degrees=True)
-    aji = track.align_joint_index
-    frame0_xz = track.positions[0, aji, :].copy()
-    frame0_xz[1] = 0.0
+    aji       = track.align_joint_index
+    f0        = track.positions[0, aji, :].copy()
+    f0[1]     = 0.0
 
-    roots = [i for i, p in enumerate(parents) if p < 0]
-    for r in roots:
-        root_pos = pos[r].copy()           # BUG FIX: explicit copy to avoid mutating source array
-        root_pos -= frame0_xz
-        root_pos  = track_rot.apply(root_pos)
-        root_pos[0] += track.translate_x
-        root_pos[1] += track.translate_y
-        root_pos[2] += track.translate_z
-        channels.extend([f"{root_pos[0]:.4f}", f"{root_pos[1]:.4f}", f"{root_pos[2]:.4f}"])
+    for r in [i for i, p in enumerate(parents) if p < 0]:
+        rp = pos[r].copy() - f0
+        rp = track_rot.apply(rp)
+        rp[0] += track.translate_x
+        rp[1] += track.translate_y
+        rp[2] += track.translate_z
+        channels.extend([f"{rp[0]:.4f}", f"{rp[1]:.4f}", f"{rp[2]:.4f}"])
 
     for i in range(J):
-        children = [c for c, p in enumerate(parents) if p == i]
-        if parents[i] < 0 or children:
-            channels.extend([
-                f"{local_euler[i, 0]:.4f}",
-                f"{local_euler[i, 1]:.4f}",
-                f"{local_euler[i, 2]:.4f}",
-            ])
+        if parents[i] < 0 or any(p == i for p in parents):
+            channels.extend([f"{local_euler[i,0]:.4f}",
+                              f"{local_euler[i,1]:.4f}",
+                              f"{local_euler[i,2]:.4f}"])
 
     return " ".join(channels)
-
-
-# ---------------------------------------------------------------------------
-# FBX Export
-# ---------------------------------------------------------------------------
-
-def export_timeline_to_fbx(session, filepath, progress_callback=None,
-                            include_mesh=False, force_z_up=True):
-    """
-    Export all visible timeline tracks to a single FBX file.
-
-    BUG FIX: quaternion (w,x,y,z) → (x,y,z,w) reorder before all scipy calls.
-    BUG FIX: ConvertScene() physically mutated baked curves → replaced with
-             SetInScene() which writes axis metadata only.
-    BUG FIX: manager.Destroy() was called in finally but exporter.Destroy()
-             was also in finally — if exporter.Initialize failed, exporter
-             was destroyed twice (once in error path, once in finally).
-             Now exporter is only destroyed in finally.
-    BUG FIX: curve_r_z.KeySet was never called — the kz KeyAdd line for
-             rotation Z was present but the KeySet call was missing, leaving
-             the Z rotation curve empty for every joint on every frame.
-    BUG FIX: axis system block was inside the per-track loop — it ran once
-             per track, converting the scene multiple times. Moved outside.
-    BUG FIX: KeyModifyEnd for curve_r_z was missing from the finally cleanup
-             (only X and Y had it), leaving the curve in an inconsistent state.
-    """
-    try:
-        import fbx
-    except ImportError:
-        raise ImportError("Autodesk FBX Python SDK is not installed.")
-
-    tracks = [t for t in session.tracks if t is not None and t.visible]
-    if not tracks:
-        raise ValueError("No visible tracks to export.")
-
-    global_frames = int(session.max_frame)
-    if global_frames <= 0:
-        raise ValueError("Timeline is empty.")
-
-    log.info(f"Exporting FBX: {len(tracks)} track(s), {global_frames} frames → {filepath}")
-
-    manager = fbx.FbxManager.Create()
-    ios = fbx.FbxIOSettings.Create(manager, fbx.IOSROOT)
-    manager.SetIOSettings(ios)
-
-    exporter_obj = fbx.FbxExporter.Create(manager, "")
-    if not exporter_obj.Initialize(filepath, -1, manager.GetIOSettings()):
-        err = exporter_obj.GetStatus().GetErrorString()
-        exporter_obj.Destroy()
-        manager.Destroy()
-        raise RuntimeError(f"FBX Exporter failed to initialise: {err}")
-
-    scene = fbx.FbxScene.Create(manager, "Scene")
-
-    try:
-        scene.GetGlobalSettings().SetTimeMode(fbx.FbxTime.EMode.eFrames60)
-
-        anim_stack = fbx.FbxAnimStack.Create(scene, "TimelineStack")
-        anim_layer = fbx.FbxAnimLayer.Create(scene, "BaseLayer")
-        anim_stack.AddMember(anim_layer)
-
-        fbx_time = fbx.FbxTime()
-
-        for t_idx, track in enumerate(tracks):
-            pos, quats = _interpolate_track(track, global_frames)
-
-            parents = track.skeleton.parent_indices
-            J = len(parents)
-
-            # --- Precompute local Euler angles for all frames ---
-            # BUG FIX: was passing (w,x,y,z) to scipy which expects (x,y,z,w)
-            quats_xyzw = _quat_wxyz_to_xyzw(quats.reshape(-1, 4))
-            world_mats = R.from_quat(quats_xyzw).as_matrix().reshape(global_frames, J, 3, 3)
-
-            local_mats = np.zeros((global_frames, J, 3, 3))
-            for i in range(J):
-                p = parents[i]
-                if p < 0:
-                    local_mats[:, i] = world_mats[:, i]
-                else:
-                    parent_inv = np.transpose(world_mats[:, p], axes=(0, 2, 1))
-                    local_mats[:, i] = parent_inv @ world_mats[:, i]
-
-            local_euler = (
-                R.from_matrix(local_mats.reshape(-1, 3, 3))
-                 .as_euler('xyz', degrees=True)
-                 .reshape(global_frames, J, 3)
-            )
-
-            fbx_nodes = [None] * J
-
-            for i in range(J):
-                joint_name  = track.skeleton.joint_names[i]
-                name_prefix = f"{joint_name}_T{t_idx}"
-                node        = fbx.FbxNode.Create(scene, name_prefix)
-                skeleton_attr = fbx.FbxSkeleton.Create(scene, joint_name)
-
-                fbx_nodes[i] = node   # store before parenting
-
-                if parents[i] < 0:
-                    skeleton_attr.SetSkeletonType(fbx.FbxSkeleton.EType.eRoot)
-                    scene.GetRootNode().AddChild(node)
-                else:
-                    skeleton_attr.SetSkeletonType(fbx.FbxSkeleton.EType.eLimbNode)
-                    fbx_nodes[parents[i]].AddChild(node)
-
-                skeleton_attr.Size.Set(1.0)
-                node.SetNodeAttribute(skeleton_attr)
-
-                curve_t_x = node.LclTranslation.GetCurve(anim_layer, "X", True)
-                curve_t_y = node.LclTranslation.GetCurve(anim_layer, "Y", True)
-                curve_t_z = node.LclTranslation.GetCurve(anim_layer, "Z", True)
-                curve_r_x = node.LclRotation.GetCurve(anim_layer, "X", True)
-                curve_r_y = node.LclRotation.GetCurve(anim_layer, "Y", True)
-                curve_r_z = node.LclRotation.GetCurve(anim_layer, "Z", True)
-
-                curve_t_x.KeyModifyBegin(); curve_t_y.KeyModifyBegin(); curve_t_z.KeyModifyBegin()
-                curve_r_x.KeyModifyBegin(); curve_r_y.KeyModifyBegin(); curve_r_z.KeyModifyBegin()
-
-                is_root = parents[i] < 0
-
-                if is_root:
-                    track_rot = R.from_euler('xyz',
-                                             [track.rotate_x, track.rotate_y, track.rotate_z],
-                                             degrees=True)
-                    aji    = track.align_joint_index
-                    f0_pos = track.positions[0, aji, :].copy()
-                    f0_pos[1] = 0.0
-                else:
-                    offset_val = track.positions[0, i] - track.positions[0, parents[i]]
-
-                for f in range(-1, global_frames):
-                    if f % 250 == 0:
-                        from PySide6.QtWidgets import QApplication
-                        QApplication.processEvents()
-
-                    fbx_time.SetFrame(f + 1, fbx.FbxTime.EMode.eFrames60)
-
-                    # --- Determine position and euler for this frame ---
-                    if f == -1:
-                        # Rest-pose frame
-                        rp = (track.rest_pose_positions
-                              if track.rest_pose_positions is not None
-                              else track.positions[0])
-                        rq = (track.rest_pose_quaternions
-                              if track.rest_pose_quaternions is not None
-                              else (track.quaternions[0] if track.quaternions is not None else None))
-
-                        p_f = rp[i].copy() if is_root else None
-
-                        if rq is not None:
-                            # BUG FIX: reorder (w,x,y,z) → (x,y,z,w)
-                            rq_1d = rq[i] if rq.ndim == 2 else rq   # handle (J,4) or (4,)
-                            rq_xyzw = np.array([rq_1d[1], rq_1d[2], rq_1d[3], rq_1d[0]])
-                            # Compute local rotation
-                            par = parents[i]
-                            if par < 0:
-                                l_mat = R.from_quat(rq_xyzw).as_matrix()
-                            else:
-                                if rq.ndim == 2:
-                                    rq_par_xyzw = np.array([rq[par,1], rq[par,2], rq[par,3], rq[par,0]])
-                                else:
-                                    rq_par_xyzw = rq_xyzw  # fallback
-                                w_mat_i   = R.from_quat(rq_xyzw).as_matrix()
-                                w_mat_par = R.from_quat(rq_par_xyzw).as_matrix()
-                                l_mat = w_mat_par.T @ w_mat_i
-                            e_f = R.from_matrix(l_mat).as_euler('xyz', degrees=True)
-                        else:
-                            e_f = np.zeros(3)
-                    else:
-                        p_f = pos[f, i].copy() if is_root else None
-                        e_f = local_euler[f, i]
-
-                    # --- Write translation keys ---
-                    if is_root:
-                        p_f -= f0_pos
-                        p_f  = track_rot.apply(p_f)
-                        p_f[0] += track.translate_x
-                        p_f[1] += track.translate_y
-                        p_f[2] += track.translate_z
-
-                        kx = curve_t_x.KeyAdd(fbx_time)[0]; curve_t_x.KeySet(kx, fbx_time, float(p_f[0]))
-                        ky = curve_t_y.KeyAdd(fbx_time)[0]; curve_t_y.KeySet(ky, fbx_time, float(p_f[1]))
-                        kz = curve_t_z.KeyAdd(fbx_time)[0]; curve_t_z.KeySet(kz, fbx_time, float(p_f[2]))
-
-                        rr      = R.from_euler('xyz', e_f, degrees=True)
-                        final_e = (track_rot * rr).as_euler('xyz', degrees=True)
-                        e_x, e_y, e_z = final_e
-                    else:
-                        kx = curve_t_x.KeyAdd(fbx_time)[0]; curve_t_x.KeySet(kx, fbx_time, float(offset_val[0]))
-                        ky = curve_t_y.KeyAdd(fbx_time)[0]; curve_t_y.KeySet(ky, fbx_time, float(offset_val[1]))
-                        kz = curve_t_z.KeyAdd(fbx_time)[0]; curve_t_z.KeySet(kz, fbx_time, float(offset_val[2]))
-                        e_x, e_y, e_z = e_f
-
-                    # --- Write rotation keys ---
-                    kx = curve_r_x.KeyAdd(fbx_time)[0]; curve_r_x.KeySet(kx, fbx_time, float(e_x))
-                    ky = curve_r_y.KeyAdd(fbx_time)[0]; curve_r_y.KeySet(ky, fbx_time, float(e_y))
-                    # BUG FIX: curve_r_z.KeySet was NEVER called in original — Z rotation was blank
-                    kz = curve_r_z.KeyAdd(fbx_time)[0]; curve_r_z.KeySet(kz, fbx_time, float(e_z))
-
-                curve_t_x.KeyModifyEnd(); curve_t_y.KeyModifyEnd(); curve_t_z.KeyModifyEnd()
-                curve_r_x.KeyModifyEnd(); curve_r_y.KeyModifyEnd(); curve_r_z.KeyModifyEnd()
-
-            # --- Bind pose ---
-            bind_pose = fbx.FbxPose.Create(scene, f"BindPose_T{t_idx}")
-            bind_pose.SetIsBindPose(True)
-            for n in fbx_nodes:
-                bind_pose.Add(n, fbx.FbxMatrix(n.EvaluateGlobalTransform(fbx.FbxTime(0))))
-            scene.AddPose(bind_pose)
-
-            # --- Optional proxy mesh (Option B) ---
-            if include_mesh and len(fbx_nodes) > 0:
-                mesh_name = f"ProxyMesh_T{t_idx}"
-                mesh = fbx.FbxMesh.Create(scene, mesh_name)
-
-                mesh.InitControlPoints(3)
-                mesh.SetControlPointAt(fbx.FbxVector4(0,     0,     0, 0), 0)
-                mesh.SetControlPointAt(fbx.FbxVector4(0.001, 0,     0, 0), 1)
-                mesh.SetControlPointAt(fbx.FbxVector4(0,     0.001, 0, 0), 2)
-
-                mesh.BeginPolygon(); mesh.AddPolygon(0); mesh.AddPolygon(1); mesh.AddPolygon(2); mesh.EndPolygon()
-
-                mesh_node = fbx.FbxNode.Create(scene, f"{mesh_name}_Node")
-                mesh_node.SetNodeAttribute(mesh)
-                scene.GetRootNode().AddChild(mesh_node)
-
-                skin    = fbx.FbxSkin.Create(scene, f"Skin_T{t_idx}")
-                cluster = fbx.FbxCluster.Create(scene, f"Cluster_T{t_idx}")
-                cluster.SetLink(fbx_nodes[0])
-                cluster.SetLinkMode(fbx.FbxCluster.eTotalOne)
-                cluster.AddControlPointIndex(0, 1.0)
-                cluster.AddControlPointIndex(1, 1.0)
-                cluster.AddControlPointIndex(2, 1.0)
-                cluster.SetTransformMatrix(mesh_node.EvaluateGlobalTransform(fbx.FbxTime(0)))
-                cluster.SetTransformLinkMatrix(fbx_nodes[0].EvaluateGlobalTransform(fbx.FbxTime(0)))
-                skin.AddCluster(cluster)
-                mesh.AddDeformer(skin)
-
-                bind_pose.Add(mesh_node, fbx.FbxMatrix(mesh_node.EvaluateGlobalTransform(fbx.FbxTime(0))))
-
-            if progress_callback:
-                percent = int(((t_idx + 1) / len(tracks)) * 100)
-                if progress_callback(percent):
-                    try:
-                        os.remove(filepath)
-                    except OSError:
-                        pass
-                    log.warning("FBX export cancelled by user. Partial file deleted.")
-                    return False
-
-        # BUG FIX: axis system block was INSIDE the per-track loop — it ran once
-        # per track, calling ConvertScene multiple times and compounding the rotation.
-        # Moved here, outside the loop, and replaced ConvertScene with SetInScene
-        # which writes metadata only and does NOT mutate any transform curves.
-        if force_z_up:
-            axis_system = fbx.FbxAxisSystem(
-                fbx.FbxAxisSystem.EUpVector.eZAxis,
-                fbx.FbxAxisSystem.EFrontVector.eParityOdd,
-                fbx.FbxAxisSystem.ECoordSystem.eRightHanded,
-            )
-        else:
-            axis_system = fbx.FbxAxisSystem(
-                fbx.FbxAxisSystem.EUpVector.eYAxis,
-                fbx.FbxAxisSystem.EFrontVector.eParityOdd,
-                fbx.FbxAxisSystem.ECoordSystem.eRightHanded,
-            )
-        axis_system.SetInScene(scene)
-
-        exporter_obj.Export(scene)
-        log.info("FBX export complete.")
-        return True
-
-    finally:
-        exporter_obj.Destroy()
-        manager.Destroy()

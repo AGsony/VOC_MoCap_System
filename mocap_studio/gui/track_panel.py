@@ -274,7 +274,15 @@ class SingleTrackControls(QGroupBox):
         row1.addWidget(self.visible_cb)
         layout.addLayout(row1)
 
-        # Row 2: Filename label
+        # Row 2: Name field and Filename label
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Track Name")
+        self.name_edit.textEdited.connect(lambda: self.settings_changed.emit(self.slot))
+        row2.addWidget(self.name_edit, 1)
+        layout.addLayout(row2)
+
         self.filename_label = QLabel("No file loaded")
         self.filename_label.setStyleSheet("color: #888; font-size: 10px; font-weight: normal;")
         self.filename_label.setWordWrap(True)
@@ -471,6 +479,7 @@ class SingleTrackControls(QGroupBox):
 
     # ------------------------------------------------------------------
     def _set_controls_enabled(self, enabled: bool):
+        self.name_edit.setEnabled(enabled)
         self.align_combo.setEnabled(enabled)
         self.align_frames_btn.setEnabled(enabled)
         self.align_skeletons_btn.setEnabled(enabled)
@@ -500,6 +509,12 @@ class SingleTrackControls(QGroupBox):
         self._loaded = True
         self._joint_names = joint_names
         self._hidden_joints = set()
+        
+        # Inject explicit Track Name logic
+        self.name_edit.blockSignals(True)
+        self.name_edit.setText(name)
+        self.name_edit.blockSignals(False)
+        
         self.filename_label.setText(name)
         self.filename_label.setStyleSheet("color: #ccc; font-size: 10px; font-weight: normal;")
 
@@ -565,6 +580,11 @@ class SingleTrackControls(QGroupBox):
         self._loaded = False
         self._joint_names = []
         self._hidden_joints = set()
+        
+        self.name_edit.blockSignals(True)
+        self.name_edit.clear()
+        self.name_edit.blockSignals(False)
+        
         self.filename_label.setText("No file loaded")
         self.filename_label.setStyleSheet("color: #888; font-size: 10px; font-weight: normal;")
 

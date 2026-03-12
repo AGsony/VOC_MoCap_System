@@ -414,6 +414,8 @@ class MainWindow(QMainWindow):
 
         tc = self._track_panel.track_controls[slot]
 
+        track.name = tc.name_edit.text().strip() or track.name
+
         track.offset = tc.offset_spin.value()
         track.scale = tc.scale_spin.value()
         track.trim_in = tc.trim_in_spin.value()
@@ -777,7 +779,7 @@ class MainWindow(QMainWindow):
         
         # FBX Mesh Toggle
         mesh_cb = QCheckBox("Include Procedural Mesh (Forces DCC Armature Rigging)")
-        mesh_cb.setChecked(True)
+        mesh_cb.setChecked(False)
         mesh_cb.setToolTip("Injects a 3-vertex invisible proxy mesh. Essential for Blender/Maya to visualize skeletons natively.")
         layout.addWidget(mesh_cb)
         
