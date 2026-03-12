@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QComboBox, QStatusBar,
     QMenuBar, QMenu, QSpinBox, QMessageBox, QApplication,
     QTabWidget, QScrollArea, QProgressDialog, QCheckBox,
+    QDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence
@@ -199,29 +200,6 @@ class MainWindow(QMainWindow):
         self._export_btn.setToolTip("Export the entire aligned timeline to BVH/FBX")
         self._export_btn.clicked.connect(self._on_export_requested)
         controls_layout.addWidget(self._export_btn)
-        
-        self._export_mesh_cb = QCheckBox(" Include Mesh")
-        self._export_mesh_cb.setChecked(False)
-        self._export_mesh_cb.setToolTip("Export a proxy skinned mesh (Option B) to force DCC software to visually rig an Armature.\nIf unchecked, exports clean skeleton metadata (Option A).")
-        controls_layout.addWidget(self._export_mesh_cb)
-
-        controls_layout.addSpacing(10)
-
-        controls_layout.addWidget(QLabel("Up-Axis:"))
-        self._export_axis_combo = QComboBox()
-        self._export_axis_combo.addItems(["Z-Up (Blender, Unreal)", "Y-Up (Maya, Unity)"])
-        self._export_axis_combo.setCurrentIndex(0)  # Default Z-Up
-        self._export_axis_combo.setToolTip("Match this to your target 3D application's workspace orientation to prevent skeletons from importing upside down.")
-        controls_layout.addWidget(self._export_axis_combo)
-
-        controls_layout.addSpacing(10)
-
-        controls_layout.addWidget(QLabel("FBX Up-Axis:"))
-        self._export_axis_combo = QComboBox()
-        self._export_axis_combo.addItems(["Z-Up (Blender, Unreal)", "Y-Up (Maya, Unity)"])
-        self._export_axis_combo.setCurrentIndex(0)  # Default Z-Up
-        self._export_axis_combo.setToolTip("Match this to your target 3D application's workspace orientation to prevent skeletons from importing upside down.")
-        controls_layout.addWidget(self._export_axis_combo)
 
         controls_layout.addSpacing(20)
 
@@ -773,13 +751,85 @@ class MainWindow(QMainWindow):
         self._update_timeline()
 
     def _on_export_requested(self):
-        log.info(f"Timeline Export requested.")
-        path, filter_str = QFileDialog.getSaveFileName(
-            self, "Export Timeline", "",
-            "FBX Files (*.fbx);;BVH Files (*.bvh);;All Files (*)"
-        )
+        log.info(f"Timeline Export Dialog requested.")
+        
+        # Build the custom Export Dialog inline
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Export Timeline Settings")
+        layout = QVBoxLayout(dialog)
+        
+        # Format Combo
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        format_combo = QComboBox()
+        format_combo.addItems([".fbx (Autodesk FBX)", ".bvh (Biovision Hierarchy)"])
+        format_layout.addWidget(format_combo)
+        layout.addLayout(format_layout)
+        
+        # Up-Axis Combo
+        axis_layout = QHBoxLayout()
+        axis_label = QLabel("Up-Axis:")
+        axis_layout.addWidget(axis_label)
+        axis_combo = QComboBox()
+        axis_combo.addItems(["Z-Up (Blender, Unreal Engine)", "Y-Up (Maya, Unity)"])
+        axis_layout.addWidget(axis_combo)
+        layout.addLayout(axis_layout)
+        
+        # FBX Mesh Toggle
+        mesh_cb = QCheckBox("Include Procedural Mesh (Forces DCC Armature Rigging)")
+        mesh_cb.setChecked(True)
+        mesh_cb.setToolTip("Injects a 3-vertex invisible proxy mesh. Essential for Blender/Maya to visualize skeletons natively.")
+        layout.addWidget(mesh_cb)
+        
+        # File selector
+        file_layout = QHBoxLayout()
+        path_input = QLineEdit()
+        path_input.setPlaceholderText("Select Destination...")
+        file_layout.addWidget(path_input)
+        
+        browse_btn = QPushButton("Browse")
+        file_layout.addWidget(browse_btn)
+        layout.addLayout(file_layout)
+        
+        # Buttons
+        btn_box = QHBoxLayout()
+        export_btn = QPushButton("Export")
+        export_btn.setDefault(True)
+        cancel_btn = QPushButton("Cancel")
+        btn_box.addWidget(export_btn)
+        btn_box.addWidget(cancel_btn)
+        layout.addLayout(btn_box)
+        
+        # Callbacks
+        def _on_format_changed(idx):
+            is_fbx = (idx == 0)
+            axis_combo.setEnabled(is_fbx)
+            mesh_cb.setEnabled(is_fbx)
+        format_combo.currentIndexChanged.connect(_on_format_changed)
+        
+        def _on_browse():
+            ext = ".fbx" if format_combo.currentIndex() == 0 else ".bvh"
+            filt = f"FBX Files (*.fbx)" if ext == ".fbx" else f"BVH Files (*.bvh)"
+            path, _ = QFileDialog.getSaveFileName(dialog, "Select Save Location", "", filt)
+            if path:
+                if not path.endswith(ext):
+                    path += ext
+                path_input.setText(path)
+        browse_btn.clicked.connect(_on_browse)
+        
+        export_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        if dialog.exec() != QDialog.Accepted:
+            return
+            
+        path = path_input.text().strip()
         if not path:
             return
+            
+        is_fbx = format_combo.currentIndex() == 0
+        force_z_up = "Z-Up" in axis_combo.currentText()
+        include_mesh = mesh_cb.isChecked()
             
         progress = QProgressDialog("Exporting Timeline Data...", "Cancel", 0, 100, self)
         progress.setWindowTitle("Export Progress")
@@ -793,11 +843,15 @@ class MainWindow(QMainWindow):
             return progress.wasCanceled()
 
         try:
-            if path.lower().endswith('.fbx'):
+            if is_fbx:
                 from ..core.exporter import export_timeline_to_fbx
-                up_axis_choice = self._export_axis_combo.currentText()
-                force_z_up = "Z-Up" in up_axis_choice
-                export_timeline_to_fbx(self._session, path, progress_callback=update_progress, include_mesh=self._export_mesh_cb.isChecked(), force_z_up=force_z_up)
+                export_timeline_to_fbx(
+                    self._session, 
+                    path, 
+                    progress_callback=update_progress, 
+                    include_mesh=include_mesh,
+                    force_z_up=force_z_up
+                )
             else:
                 from ..core.exporter import export_timeline_to_bvh
                 export_timeline_to_bvh(self._session, path, progress_callback=update_progress)

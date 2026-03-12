@@ -263,7 +263,7 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None, include_me
 
             local_euler = R.from_matrix(local_mats.reshape(-1, 3, 3)).as_euler('xyz', degrees=True).reshape(global_frames, J, 3)
 
-            fbx_nodes = []
+            fbx_nodes = [None] * J
             for i in range(J):
                 joint_name = track.skeleton.joint_names[i]
                 name_prefix = f"{joint_name}_T{t_idx}"
@@ -271,6 +271,9 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None, include_me
                 
                 # Option A: Name the geometry attribute identically to enforce strict Armature validation
                 skeleton = fbx.FbxSkeleton.Create(scene, joint_name)
+                
+                # We save the node *before* parenting to avoid index out of bounds
+                fbx_nodes[i] = node
                 
                 if parents[i] < 0:
                     skeleton.SetSkeletonType(fbx.FbxSkeleton.EType.eRoot)
@@ -281,7 +284,6 @@ def export_timeline_to_fbx(session, filepath, progress_callback=None, include_me
                     
                 skeleton.Size.Set(1.0)
                 node.SetNodeAttribute(skeleton)
-                fbx_nodes.append(node)
 
                 curve_t_x = node.LclTranslation.GetCurve(anim_layer, "X", True)
                 curve_t_y = node.LclTranslation.GetCurve(anim_layer, "Y", True)
