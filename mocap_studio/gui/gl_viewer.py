@@ -56,8 +56,8 @@ class GLViewer(QOpenGLWidget):
         # Camera state
         self._cam_yaw = 30.0      # degrees
         self._cam_pitch = 25.0    # degrees
-        self._cam_dist = 250.0    # distance from target
-        self._cam_target = np.array([0.0, 80.0, 0.0])  # look-at point
+        self._cam_dist = 2.5      # distance from target
+        self._cam_target = np.array([0.0, 0.8, 0.0])  # look-at point
         self._cam_pan_offset = np.array([0.0, 0.0, 0.0])
 
         # Mouse interaction
@@ -131,8 +131,8 @@ class GLViewer(QOpenGLWidget):
     def reset_camera(self):
         self._cam_yaw = 30.0
         self._cam_pitch = 25.0
-        self._cam_dist = 250.0
-        self._cam_target = np.array([0.0, 80.0, 0.0])
+        self._cam_dist = 2.5
+        self._cam_target = np.array([0.0, 0.8, 0.0])
         self._cam_pan_offset = np.array([0.0, 0.0, 0.0])
         self.update()
 
@@ -158,7 +158,7 @@ class GLViewer(QOpenGLWidget):
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
         aspect = w / max(h, 1)
-        gluPerspective(45.0, aspect, 1.0, 5000.0)
+        gluPerspective(45.0, aspect, 0.1, 500.0)
         glMatrixMode(GL_MODELVIEW)
 
     # ------------------------------------------------------------------
@@ -194,10 +194,10 @@ class GLViewer(QOpenGLWidget):
     def _draw_grid(self):
         """Draw a floor grid on the XZ plane."""
         glBegin(GL_LINES)
-        grid_size = 500
-        step = 25
+        grid_size = 5.0
+        step = 0.5
         glColor4f(0.28, 0.28, 0.30, 0.6)
-        for i in range(-grid_size, grid_size + step, step):
+        for i in np.arange(-grid_size, grid_size + step, step):
             # Lines along X
             glVertex3f(-grid_size, 0, i)
             glVertex3f(grid_size, 0, i)
@@ -210,7 +210,7 @@ class GLViewer(QOpenGLWidget):
         """Draw small RGB axes at origin."""
         glLineWidth(3.0)
         glBegin(GL_LINES)
-        axis_len = 30
+        axis_len = 0.3
         # X — red
         glColor3f(0.9, 0.2, 0.2)
         glVertex3f(0, 0.1, 0)
@@ -331,8 +331,8 @@ class GLViewer(QOpenGLWidget):
 
         elif self._mouse_button == Qt.RightButton:
             # Zoom (drag)
-            self._cam_dist += dy * 1.0
-            self._cam_dist = max(10, min(3000, self._cam_dist))
+            self._cam_dist += dy * 0.01
+            self._cam_dist = max(0.1, min(30.0, self._cam_dist))
 
         self.update()
         event.accept()
@@ -357,7 +357,7 @@ class GLViewer(QOpenGLWidget):
         delta = event.angleDelta().y()
         factor = 0.9 if delta > 0 else 1.1
         self._cam_dist *= factor
-        self._cam_dist = max(10, min(3000, self._cam_dist))
+        self._cam_dist = max(0.1, min(30.0, self._cam_dist))
         self.update()
         event.accept()
 

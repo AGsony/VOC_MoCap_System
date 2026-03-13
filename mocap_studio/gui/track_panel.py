@@ -562,6 +562,7 @@ class SingleTrackControls(QGroupBox):
         # Unblock all signals
         self.align_combo.blockSignals(False)
         self.offset_spin.blockSignals(False)
+        self.scale_spin.blockSignals(False)
         self.trim_in_spin.blockSignals(False)
         self.trim_out_spin.blockSignals(False)
         self.visible_cb.blockSignals(False)

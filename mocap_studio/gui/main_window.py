@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
         controls_layout.addSpacing(20)
 
         self._snap_cb = QCheckBox("Snap to Frame")
-        self._snap_cb.setChecked(False)
+        self._snap_cb.setChecked(True)
         self._snap_cb.toggled.connect(self._on_snap_toggled)
         controls_layout.addWidget(self._snap_cb)
 
